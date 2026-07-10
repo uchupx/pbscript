@@ -1,0 +1,9 @@
+- Rust (edition 2021)
+- eframe 0.27 / egui 0.27 — desktop UI (immediate mode)
+- enigo 0.2 — mouse/keyboard simulation
+- rdev 0.5 — global input hook (Windows/macOS only)
+- enigo 0.6 — input simulation (wayland feature for Wayland support)
+- evdev 0.13 — Linux evdev input reading (non-exclusive, X11+Wayland)
+- serde 1 + toml 0.8 — config persistence
+- dirs 5 — config directory (~/.config/pbscript/)
+- Clean Architecture: domain -> app -> infra layers

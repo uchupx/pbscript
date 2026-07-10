@@ -1,0 +1,7 @@
+- [x] Upgrade enigo 0.2 -> 0.6 with wayland feature for Wayland input sim
+- [x] Switch to evdev non-exclusive read on Linux (works on X11 + Wayland)
+- [ ] Test on Windows (rdev + enigo behavior)
+- [ ] Test on Linux Wayland (needs `input` group membership for /dev/input/event*)
+- [ ] Test on Linux X11 (should still work via evdev)
+- [ ] Add tray icon for minimize-to-tray
+- [ ] Add profile/save multiple configs

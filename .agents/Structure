@@ -1,0 +1,28 @@
+pbscript/
+├── Cargo.toml
+├── docs/
+│   └── superpowers/
+│       ├── plans/
+│       │   └── 2026-07-10-pbscript-sniper-quick-switch-plan.md
+│       └── specs/
+│           └── 2026-07-10-pbscript-sniper-quick-switch-design.md
+├── .agents/
+│   ├── Structure
+│   ├── Tech
+│   ├── Schema
+│   └── TODO
+├── src/
+│   ├── main.rs                 — entry, glue layers
+│   ├── domain/
+│   │   ├── mod.rs
+│   │   ├── entities.rs         — StepAction, SwitchMode, SequenceStep, Key
+│   │   └── ports.rs            — InputEnginePort, ConfigPort
+│   ├── app/
+│   │   ├── mod.rs
+│   │   └── state.rs            — AppConfig, AppState
+│   └── infra/
+│       ├── mod.rs
+│       ├── config_toml.rs      — ConfigPort impl (TOML)
+│       ├── input_enigo.rs      — InputEnginePort impl (enigo)
+│       ├── listener.rs         — global input hook (rdev)
+│       └── ui_eframe.rs        — egui window

@@ -1,0 +1,34 @@
+--- Domain Entities ---
+StepAction           enum { RightClick, LeftClick, Switch(SwitchMode) }
+SwitchMode           enum { QQ, Num31 } (serde)
+SequenceStep         struct { action: StepAction, delay_ms: u32 }
+SniperSequence       struct { steps: Vec<SequenceStep> }
+Key                  enum { Q, Key1, Key3 }
+
+--- Domain Ports ---
+InputEnginePort      trait { right_click(), left_click(), press(Key), release(Key) }
+ConfigPort           trait { load(), save() }
+
+--- Listener ---
+Linux: evdev non-exclusive read — opens /dev/input/event* without grab
+  - Thread per device reads EV_KEY events via channel
+  - LeftClick (BTN_LEFT press) when active → execute sequence
+  - Toggle key press → flip active state
+  - Compositor still receives events normally
+Windows/macOS: rdev::listen — X11/WinAPI global hook
+
+--- App Config (TOML) ---
+AppConfig            struct {
+                       buka_delay_ms: u32 (default 70, 0-100)
+                       tembak_delay_ms: u32 (default 30, 0-100)
+                       tutup_delay_ms: u32 (default 50, 0-100)
+                       ganti_delay_ms: u32 (default 50, 0-100)
+                       switch_mode: SwitchMode (default QQ)
+                       toggle_key: String (default "F12")
+                     }
+
+--- App State (runtime) ---
+AppState             struct {
+                       active: AtomicBool
+                       config: Mutex<AppConfig>
+                     }
