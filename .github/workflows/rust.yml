@@ -22,3 +22,4 @@ jobs:
         with:
           RUSTTARGET: x86_64-pc-windows-gnu
           EXTRA_FILES: "README.md LICENSE"
+          TOOLCHAIN_VERSION: stable
