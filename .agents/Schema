@@ -1,34 +1,88 @@
---- Domain Entities ---
-StepAction           enum { RightClick, LeftClick, Switch(SwitchMode) }
-SwitchMode           enum { QQ, Num31 } (serde)
-SequenceStep         struct { action: StepAction, delay_ms: u32 }
-SniperSequence       struct { steps: Vec<SequenceStep> }
-Key                  enum { Q, Key1, Key3 }
+// domain/entities.rs
 
---- Domain Ports ---
-InputEnginePort      trait { right_click(), left_click(), press(Key), release(Key) }
-ConfigPort           trait { load(), save() }
+enum ModeType {           // serde Serialize + Deserialize
+    Sniper,
+    ArSmg,
+    Shotgun,
+}
 
---- Listener ---
-Linux: evdev non-exclusive read — opens /dev/input/event* without grab
-  - Thread per device reads EV_KEY events via channel
-  - LeftClick (BTN_LEFT press) when active → execute sequence
-  - Toggle key press → flip active state
-  - Compositor still receives events normally
-Windows/macOS: rdev::listen — X11/WinAPI global hook
+enum StepAction {
+    RightClick,
+    LeftClick,
+    Switch(SwitchMode),
+}
 
---- App Config (TOML) ---
-AppConfig            struct {
-                       buka_delay_ms: u32 (default 70, 0-100)
-                       tembak_delay_ms: u32 (default 30, 0-100)
-                       tutup_delay_ms: u32 (default 50, 0-100)
-                       ganti_delay_ms: u32 (default 50, 0-100)
-                       switch_mode: SwitchMode (default QQ)
-                       toggle_key: String (default "F12")
-                     }
+enum SwitchMode {         // serde Serialize + Deserialize
+    QQ,
+    Num31,
+}
 
---- App State (runtime) ---
-AppState             struct {
-                       active: AtomicBool
-                       config: Mutex<AppConfig>
-                     }
+struct SequenceStep {
+    action: StepAction,
+    delay_ms: u32,          // 0..100
+}
+
+struct SniperSequence {
+    steps: Vec<SequenceStep>,   // 4 steps: RightClick, LeftClick, RightClick, Switch
+}
+
+enum Key {
+    Q,
+    Key1,
+    Key3,
+}
+
+
+// domain/ports.rs
+
+trait InputEnginePort: Send + Sync {
+    fn right_click(&self);
+    fn left_click(&self);
+    fn press(&self, key: Key);
+    fn release(&self, key: Key);
+    fn move_mouse_relative(&self, dx: i32, dy: i32);
+}
+
+trait ConfigPort: Send {
+    fn load(&mut self);
+    fn save(&self);
+}
+
+
+// app/state.rs
+
+struct AppConfig {          // serde Serialize + Deserialize
+    buka_delay_ms: u32,         // default: 70
+    tembak_delay_ms: u32,       // default: 30
+    tutup_delay_ms: u32,        // default: 50
+    ganti_delay_ms: u32,        // default: 50
+    switch_mode: SwitchMode,    // default: QQ
+    toggle_key: String,         // default: "F12"
+    current_mode: ModeType,     // default: Sniper
+    ar_delay_ms: u32,           // default: 50
+    ar_recoil_enabled: bool,    // default: false
+    ar_recoil_pixels: i32,      // default: 10
+    shotgun_tembak_delay_ms: u32, // default: 30
+    shotgun_ganti_delay_ms: u32,  // default: 50
+}
+
+struct AppState {
+    active: AtomicBool,
+    config: Mutex<AppConfig>,
+}
+
+
+// infra/ui_eframe.rs
+
+struct PbscriptApp {
+    state: Arc<AppState>,
+    config_cache: AppConfig,
+}
+
+
+// infra/listener.rs
+
+static SPRAYING: AtomicBool;
+// Methods: handle_lclick_press, handle_lclick_release,
+//          execute_sequence_sniper, execute_sequence_shotgun,
+//          start_spray, stop_spray, do_switch

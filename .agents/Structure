@@ -1,28 +1,33 @@
 pbscript/
 ├── Cargo.toml
+├── Cargo.lock
+├── .github/
 ├── docs/
 │   └── superpowers/
 │       ├── plans/
-│       │   └── 2026-07-10-pbscript-sniper-quick-switch-plan.md
+│       │   ├── 2026-07-10-pbscript-wayland-fix-plan.md
+│       │   ├── 2026-07-10-pbscript-sniper-quick-switch-plan.md
+│       │   └── 2026-07-12-pbscript-ar-smg-shotgun-modes-plan.md
 │       └── specs/
-│           └── 2026-07-10-pbscript-sniper-quick-switch-design.md
-├── .agents/
-│   ├── Structure
-│   ├── Tech
-│   ├── Schema
-│   └── TODO
+│           ├── 2026-07-10-pbscript-sniper-quick-switch-design.md
+│           └── 2026-07-12-pbscript-ar-smg-shotgun-modes-design.md
 ├── src/
-│   ├── main.rs                 — entry, glue layers
+│   ├── main.rs                    # Entry point, wires everything together
 │   ├── domain/
 │   │   ├── mod.rs
-│   │   ├── entities.rs         — StepAction, SwitchMode, SequenceStep, Key
-│   │   └── ports.rs            — InputEnginePort, ConfigPort
+│   │   ├── entities.rs            # Domain entities: ModeType, StepAction, SwitchMode, SequenceStep, SniperSequence, Key
+│   │   └── ports.rs               # Traits: InputEnginePort (incl move_mouse_relative), ConfigPort
 │   ├── app/
 │   │   ├── mod.rs
-│   │   └── state.rs            — AppConfig, AppState
+│   │   └── state.rs               # AppConfig (serde), AppState (shared runtime state)
 │   └── infra/
 │       ├── mod.rs
-│       ├── config_toml.rs      — ConfigPort impl (TOML)
-│       ├── input_enigo.rs      — InputEnginePort impl (enigo)
-│       ├── listener.rs         — global input hook (rdev)
-│       └── ui_eframe.rs        — egui window
+│       ├── ui_eframe.rs           # egui UI: PbscriptApp, 3 mode tabs with sliders
+│       ├── config_toml.rs         # ConfigToml: TOML file persistence
+│       ├── listener.rs            # Global key listener: evdev (Linux) / rdev (other), mode dispatch
+│       └── input_enigo.rs         # InputEngineEnigo: enigo-based input simulation + move_mouse
+└── .agents/
+    ├── Structure
+    ├── Tech
+    ├── Schema
+    └── TODO

@@ -1,9 +1,37 @@
-- Rust (edition 2021)
-- eframe 0.27 / egui 0.27 — desktop UI (immediate mode)
-- enigo 0.2 — mouse/keyboard simulation
-- rdev 0.5 — global input hook (Windows/macOS only)
-- enigo 0.6 — input simulation (wayland feature for Wayland support)
-- evdev 0.13 — Linux evdev input reading (non-exclusive, X11+Wayland)
-- serde 1 + toml 0.8 — config persistence
-- dirs 5 — config directory (~/.config/pbscript/)
-- Clean Architecture: domain -> app -> infra layers
+Languages:
+  - Rust (edition 2021)
+
+Frameworks / Libraries:
+  - eframe 0.27    — GUI framework (egui native wrapper)
+  - egui 0.27      — Immediate-mode GUI
+  - enigo 0.6      — Cross-platform keyboard/mouse input simulation (Wayland feature enabled)
+  - rdev 0.5       — Global keyboard/mouse event listener (Windows/macOS fallback)
+  - evdev 0.13     — Linux input event device listener (non-exclusive, works on X11 + Wayland)
+  - serde 1        — Serialization/deserialization (with derive)
+  - toml 0.8       — TOML config file format
+  - dirs 5         — OS config directory resolution
+  - log 0.4        — Logging facade
+  - env_logger 0.11 — Environment-based logger (RUST_LOG)
+
+Architecture:
+  - Clean architecture with 3 layers:
+    - domain/    — Entities & port traits (no external dependencies)
+    - app/       — Application state & config
+    - infra/     — Infrastructure: UI, input, config persistence, listener
+  - Trait-based abstraction for input engine (InputEnginePort)
+  - Trait-based abstraction for config persistence (ConfigPort)
+  - Arc<AppState> shared between UI thread and listener thread
+  - AtomicBool for active flag (lock-free cross-thread signaling)
+  - AtomicBool (static SPRAYING) for AR/SMG spray loop control
+  - Mutex<AppConfig> for shared config access
+  - Mode dispatch: handle_lclick_press/release routes to mode-specific logic
+  - Platform-conditional listener: evdev on Linux, rdev on other
+
+Modes:
+  - Sniper: 4-step sequence (RClick → LClick → RClick → Switch), trigger on L-Click
+  - AR/SMG: hold-to-spray loop with optional recoil pull, trigger on L-Click press/release
+  - Shotgun: 2-step sequence (LClick → Switch), trigger on L-Click
+
+Build / Tooling:
+  - Cargo (Rust package manager)
+  - Platform-conditional deps: evdev only on Linux
