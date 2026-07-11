@@ -1,6 +1,6 @@
 use std::sync::Mutex;
 
-use enigo::{Direction, Enigo, Key as EnigoKey, Keyboard, Mouse, Settings};
+use enigo::{Coordinate, Direction, Enigo, Key as EnigoKey, Keyboard, Mouse, Settings};
 
 use crate::domain::entities::Key;
 use crate::domain::ports::InputEnginePort;
@@ -54,5 +54,13 @@ impl InputEnginePort for InputEngineEnigo {
     fn release(&self, key: Key) {
         let ek = Self::map_key(key);
         let _ = self.enigo.lock().unwrap().key(ek, Direction::Release);
+    }
+
+    fn move_mouse_relative(&self, dx: i32, dy: i32) {
+        let _ = self
+            .enigo
+            .lock()
+            .unwrap()
+            .move_mouse(dx, dy, Coordinate::Relative);
     }
 }
