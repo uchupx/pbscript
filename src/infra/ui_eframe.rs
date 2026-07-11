@@ -5,19 +5,11 @@ use eframe::egui::{self, Slider};
 
 use crate::app::state::AppConfig;
 use crate::app::state::AppState;
-use crate::domain::entities::SwitchMode;
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum ModeTab {
-    Sniper,
-    ArSmg,
-    Shotgun,
-}
+use crate::domain::entities::{ModeType, SwitchMode};
 
 pub struct PbscriptApp {
     state: Arc<AppState>,
     config_cache: AppConfig,
-    selected_tab: ModeTab,
 }
 
 impl PbscriptApp {
@@ -26,7 +18,6 @@ impl PbscriptApp {
         Self {
             state,
             config_cache,
-            selected_tab: ModeTab::Sniper,
         }
     }
 
@@ -44,18 +35,14 @@ impl eframe::App for PbscriptApp {
 
             // --- Mode tabs ---
             ui.horizontal(|ui| {
-                ui.selectable_value(&mut self.selected_tab, ModeTab::Sniper, "Senapan");
-                ui.add_enabled(false, egui::SelectableLabel::new(
-                    self.selected_tab == ModeTab::ArSmg, "AR / SMG",
-                ));
-                ui.add_enabled(false, egui::SelectableLabel::new(
-                    self.selected_tab == ModeTab::Shotgun, "Shotgun",
-                ));
+                ui.selectable_value(&mut self.config_cache.current_mode, ModeType::Sniper, "Senapan");
+                ui.selectable_value(&mut self.config_cache.current_mode, ModeType::ArSmg, "AR / SMG");
+                ui.selectable_value(&mut self.config_cache.current_mode, ModeType::Shotgun, "Shotgun");
             });
             ui.separator();
 
-            match self.selected_tab {
-                ModeTab::Sniper => {
+            match self.config_cache.current_mode {
+                ModeType::Sniper => {
                     // --- Sequence steps ---
                     ui.label("Urutan:");
                     egui::Frame::group(ui.style()).show(ui, |ui| {
@@ -100,11 +87,45 @@ impl eframe::App for PbscriptApp {
                         }
                     });
                 }
-                ModeTab::ArSmg | ModeTab::Shotgun => {
-                    ui.vertical_centered(|ui| {
-                        ui.add_space(40.0);
-                        ui.label("\u{1f512} Coming Soon");
-                        ui.label("Mode ini belum tersedia.");
+
+                ModeType::ArSmg => {
+                    ui.label("Spray Control:");
+                    egui::Frame::group(ui.style()).show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label("Delay Tembak");
+                            ui.add(Slider::new(&mut self.config_cache.ar_delay_ms, 0..=100).text("ms"));
+                        });
+                        ui.horizontal(|ui| {
+                            ui.checkbox(&mut self.config_cache.ar_recoil_enabled, "Recoil");
+                            if self.config_cache.ar_recoil_enabled {
+                                ui.add(egui::Slider::new(&mut self.config_cache.ar_recoil_pixels, 0..=50).text("px"));
+                            }
+                        });
+                    });
+                    ui.label("Tekan & tahan L-Click untuk spray");
+                }
+
+                ModeType::Shotgun => {
+                    ui.label("Urutan:");
+                    egui::Frame::group(ui.style()).show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label("1. Tembak");
+                            ui.label("[L-Click]");
+                            ui.add(Slider::new(&mut self.config_cache.shotgun_tembak_delay_ms, 0..=100).text("ms"));
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label("2. Ganti");
+                            ui.label(match self.config_cache.switch_mode {
+                                SwitchMode::QQ => "[QQ]",
+                                SwitchMode::Num31 => "[31]",
+                            });
+                            ui.add(Slider::new(&mut self.config_cache.shotgun_ganti_delay_ms, 0..=100).text("ms"));
+                        });
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label("Mode Ganti:");
+                        ui.radio_value(&mut self.config_cache.switch_mode, SwitchMode::QQ, "QQ");
+                        ui.radio_value(&mut self.config_cache.switch_mode, SwitchMode::Num31, "31");
                     });
                 }
             }
