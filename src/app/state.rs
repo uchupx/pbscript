@@ -1,4 +1,4 @@
-use crate::domain::entities::SwitchMode;
+use crate::domain::entities::{ModeType, SwitchMode};
 
 /// Persistent app configuration (serde-serialized to TOML).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -9,6 +9,12 @@ pub struct AppConfig {
     pub ganti_delay_ms: u32,
     pub switch_mode: SwitchMode,
     pub toggle_key: String,
+    pub current_mode: ModeType,
+    pub ar_delay_ms: u32,
+    pub ar_recoil_enabled: bool,
+    pub ar_recoil_pixels: i32,
+    pub shotgun_tembak_delay_ms: u32,
+    pub shotgun_ganti_delay_ms: u32,
 }
 
 impl Default for AppConfig {
@@ -20,6 +26,12 @@ impl Default for AppConfig {
             ganti_delay_ms: 50,
             switch_mode: SwitchMode::QQ,
             toggle_key: "F12".to_string(),
+            current_mode: ModeType::Sniper,
+            ar_delay_ms: 50,
+            ar_recoil_enabled: false,
+            ar_recoil_pixels: 10,
+            shotgun_tembak_delay_ms: 30,
+            shotgun_ganti_delay_ms: 50,
         }
     }
 }
