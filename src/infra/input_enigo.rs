@@ -61,6 +61,6 @@ impl InputEnginePort for InputEngineEnigo {
             .enigo
             .lock()
             .unwrap()
-            .move_mouse(dx, dy, Coordinate::Relative);
+            .move_mouse(dx, dy, Coordinate::Rel);
     }
 }

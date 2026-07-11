@@ -1,4 +1,4 @@
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::sync::Arc;
 use std::time::Duration;
@@ -6,8 +6,10 @@ use std::time::Duration;
 use log::{debug, error, info};
 
 use crate::app::state::AppState;
-use crate::domain::entities::{Key, SequenceStep, StepAction, SwitchMode};
+use crate::domain::entities::{Key, ModeType, SequenceStep, StepAction, SwitchMode};
 use crate::domain::ports::InputEnginePort;
+
+static SPRAYING: AtomicBool = AtomicBool::new(false);
 
 pub struct Listener;
 
@@ -65,17 +67,19 @@ impl Listener {
         std::thread::spawn(move || {
             let toggle = Self::toggle_key_evdev;
             for (key, value) in rx {
-                if value != 1 {
-                    continue;
-                }
                 if key == KeyCode::BTN_LEFT {
-                    if state.active.load(Ordering::Relaxed) {
-                        debug!("Left click detected, executing sequence");
-                        Self::execute_sequence(&state, &*engine);
+                    if value == 1 && state.active.load(Ordering::Relaxed) {
+                        debug!("Left click press, dispatching");
+                        Self::handle_lclick_press(&state, &engine);
+                    } else if value == 0 {
+                        Self::handle_lclick_release(&state);
                     }
                 } else if key == toggle(&state) {
-                    let old = state.active.fetch_xor(true, Ordering::Relaxed);
-                    info!("Toggle key pressed, active: {} -> {}", old, !old);
+                    if value == 1 {
+                        Self::stop_spray();
+                        let old = state.active.fetch_xor(true, Ordering::Relaxed);
+                        info!("Toggle key pressed, active: {} -> {}", old, !old);
+                    }
                 }
             }
         });
@@ -116,13 +120,17 @@ impl Listener {
                 match event.event_type {
                     EventType::ButtonPress(rdev::Button::Left) => {
                         if state.active.load(Ordering::Relaxed) {
-                            debug!("Left click detected, executing sequence");
-                            Self::execute_sequence(&state, &*engine);
+                            debug!("Left click press, dispatching");
+                            Self::handle_lclick_press(&state, &engine);
                         }
+                    }
+                    EventType::ButtonRelease(rdev::Button::Left) => {
+                        Self::handle_lclick_release(&state);
                     }
                     EventType::KeyPress(key) => {
                         let current_toggle = Self::toggle_key_rdev(&state);
                         if key == current_toggle {
+                            Self::stop_spray();
                             let old = state.active.fetch_xor(true, Ordering::Relaxed);
                             info!("Toggle key pressed, active: {} -> {}", old, !old);
                         }
@@ -156,9 +164,32 @@ impl Listener {
         }
     }
 
-    // ---- Shared sequence execution ----
+    // ---- Shared mode dispatch ----
 
-    fn execute_sequence(state: &AppState, engine: &dyn InputEnginePort) {
+    fn handle_lclick_press(state: &Arc<AppState>, engine: &Arc<dyn InputEnginePort>) {
+        let config = state.config.lock().unwrap();
+        let mode = config.current_mode;
+        drop(config);
+
+        match mode {
+            ModeType::Sniper => Self::execute_sequence_sniper(state, &**engine),
+            ModeType::Shotgun => Self::execute_sequence_shotgun(state, &**engine),
+            ModeType::ArSmg => Self::start_spray(state.clone(), engine.clone()),
+        }
+    }
+
+    fn handle_lclick_release(state: &AppState) {
+        let config = state.config.lock().unwrap();
+        let mode = config.current_mode;
+        drop(config);
+        if mode == ModeType::ArSmg {
+            Self::stop_spray();
+        }
+    }
+
+    // ---- Sniper: 4-step scope -> shoot -> unscope -> switch ----
+
+    fn execute_sequence_sniper(state: &AppState, engine: &dyn InputEnginePort) {
         let config = state.config.lock().unwrap();
         let mode = config.switch_mode;
         let delays = config.delays();
@@ -185,6 +216,55 @@ impl Listener {
             }
         }
         debug!("Sequence done");
+    }
+
+    // ---- Shotgun: 2-step shoot -> switch ----
+
+    fn execute_sequence_shotgun(state: &AppState, engine: &dyn InputEnginePort) {
+        let config = state.config.lock().unwrap();
+        let mode = config.switch_mode;
+        let tembak_delay = config.shotgun_tembak_delay_ms;
+        let ganti_delay = config.shotgun_ganti_delay_ms;
+        drop(config);
+
+        debug!("Shotgun: mode={:?}", mode);
+        engine.left_click();
+        if tembak_delay > 0 {
+            std::thread::sleep(Duration::from_millis(tembak_delay as u64));
+        }
+        Self::do_switch(engine, mode);
+        if ganti_delay > 0 {
+            std::thread::sleep(Duration::from_millis(ganti_delay as u64));
+        }
+    }
+
+    // ---- AR/SMG: hold-to-spray with optional recoil pull ----
+
+    fn start_spray(state: Arc<AppState>, engine: Arc<dyn InputEnginePort>) {
+        let config = state.config.lock().unwrap();
+        let delay = config.ar_delay_ms;
+        let recoil_enabled = config.ar_recoil_enabled;
+        let recoil_pixels = config.ar_recoil_pixels;
+        drop(config);
+
+        debug!("Spray start: delay={}ms, recoil={} pixels={}", delay, recoil_enabled, recoil_pixels);
+        SPRAYING.store(true, Ordering::Relaxed);
+        std::thread::spawn(move || {
+            while SPRAYING.load(Ordering::Relaxed) {
+                engine.left_click();
+                if recoil_enabled {
+                    engine.move_mouse_relative(0, recoil_pixels);
+                }
+                if delay > 0 {
+                    std::thread::sleep(Duration::from_millis(delay as u64));
+                }
+            }
+            debug!("Spray stopped");
+        });
+    }
+
+    fn stop_spray() {
+        SPRAYING.store(false, Ordering::Relaxed);
     }
 
     fn do_switch(engine: &dyn InputEnginePort, mode: SwitchMode) {
