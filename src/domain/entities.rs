@@ -56,6 +56,14 @@ impl SniperSequence {
     }
 }
 
+/// Weapon mode selector.
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+pub enum ModeType {
+    Sniper,
+    ArSmg,
+    Shotgun,
+}
+
 /// Simple key codes for the domain layer (avoids depending on enigo/rdev types).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Key {

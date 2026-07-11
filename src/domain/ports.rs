@@ -6,6 +6,7 @@ pub trait InputEnginePort: Send + Sync {
     fn left_click(&self);
     fn press(&self, key: Key);
     fn release(&self, key: Key);
+    fn move_mouse_relative(&self, dx: i32, dy: i32);
 }
 
 /// Persistence for app config.
