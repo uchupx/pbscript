@@ -32,6 +32,12 @@ Modes:
   - AR/SMG: hold-to-spray loop with optional recoil pull, trigger on L-Click press/release
   - Shotgun: 2-step sequence (LClick → Switch), trigger on L-Click
 
+UI Design:
+  - Dark theme (egui::Visuals::dark)
+  - Fixed window 300x420, non-resizable
+  - Vertical layout: label on top, full-width slider below
+  - Bahasa Indonesia labels throughout
+
 Build / Tooling:
   - Cargo (Rust package manager)
   - Platform-conditional deps: evdev only on Linux
