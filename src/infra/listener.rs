@@ -1,9 +1,12 @@
 use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 use std::sync::mpsc;
 use std::sync::Arc;
 use std::time::Duration;
 
-use log::{debug, error, info};
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+use log::{error, info};
+use log::debug;
 
 use crate::app::state::AppState;
 use crate::domain::entities::{Key, ModeType, SequenceStep, StepAction, SwitchMode};
@@ -15,7 +18,7 @@ mod win32 {
     use std::sync::atomic::Ordering;
     use std::sync::mpsc::{self, Sender};
     use std::sync::{Arc, OnceLock};
-    use log::{error, info};
+    use log::{debug, error, info};
     use crate::app::state::AppState;
     use crate::domain::ports::InputEnginePort;
     use crate::infra::listener::Listener;
