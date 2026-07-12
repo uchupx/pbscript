@@ -70,10 +70,21 @@ impl Listener {
             let toggle = Self::toggle_key_evdev;
             for (key, value) in rx {
                 if key == KeyCode::BTN_LEFT {
-                    if value == 1 && state.active.load(Ordering::Relaxed) {
-                        debug!("Left click press, dispatching");
-                        Self::handle_lclick_press(&state, &engine);
+                    if value == 1 {
+                        // Skip simulated events (prevents feedback loop)
+                        if SIMULATING_CLICK.load(Ordering::Relaxed) {
+                            SIMULATING_CLICK.store(false, Ordering::Relaxed);
+                            RUNNING.store(false, Ordering::Release);
+                            continue;
+                        }
+                        if state.active.load(Ordering::Relaxed) {
+                            debug!("Left click press, dispatching");
+                            Self::handle_lclick_press(&state, &engine);
+                        }
                     } else if value == 0 {
+                        if SIMULATING_CLICK.load(Ordering::Relaxed) {
+                            continue;
+                        }
                         Self::handle_lclick_release(&state);
                     }
                 } else if key == toggle(&state) {
@@ -132,12 +143,21 @@ impl Listener {
             for event in rx {
                 match event.event_type {
                     EventType::ButtonPress(rdev::Button::Left) => {
+                        // Skip simulated events (prevents feedback loop)
+                        if SIMULATING_CLICK.load(Ordering::Relaxed) {
+                            SIMULATING_CLICK.store(false, Ordering::Relaxed);
+                            RUNNING.store(false, Ordering::Release);
+                            continue;
+                        }
                         if state.active.load(Ordering::Relaxed) {
                             debug!("Left click press, dispatching");
                             Self::handle_lclick_press(&state, &engine);
                         }
                     }
                     EventType::ButtonRelease(rdev::Button::Left) => {
+                        if SIMULATING_CLICK.load(Ordering::Relaxed) {
+                            continue;
+                        }
                         Self::handle_lclick_release(&state);
                     }
                     EventType::KeyPress(key) => {
@@ -188,12 +208,16 @@ impl Listener {
 
         match mode {
             ModeType::Sniper => {
+                // Flag: simulated events from this sequence should be ignored
+                SIMULATING_CLICK.store(true, Ordering::Relaxed);
                 Self::execute_sequence_sniper(state, &**engine);
-                RUNNING.store(false, Ordering::Release);
+                // RUNNING + SIMULATING_CLICK stay true — event loop clears both
+                // when it encounters the first simulated left-click event.
             }
             ModeType::Shotgun => {
+                SIMULATING_CLICK.store(true, Ordering::Relaxed);
                 Self::execute_sequence_shotgun(state, &**engine);
-                RUNNING.store(false, Ordering::Release);
+                // Same as Sniper — event loop drains the simulated event.
             }
             ModeType::ArSmg => {
                 RUNNING.store(false, Ordering::Release);

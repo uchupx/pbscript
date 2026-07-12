@@ -82,7 +82,11 @@ struct PbscriptApp {
 
 // infra/listener.rs
 
-static SPRAYING: AtomicBool;
+static SPRAYING: AtomicBool;          // Guards spray loop re-entry
+static RUNNING: AtomicBool;          // Guards sequence re-entry
+static SIMULATING_CLICK: AtomicBool; // Guards against feedback loop (simulated events looped back via listener)
 // Methods: handle_lclick_press, handle_lclick_release,
 //          execute_sequence_sniper, execute_sequence_shotgun,
 //          start_spray, stop_spray, do_switch
+// Event flow: sim click → SIMULATING_CLICK on → event loop skips simulated ButtonPress(Left)
+//             and clears SIMULATING_CLICK + RUNNING
