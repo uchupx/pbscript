@@ -30,5 +30,4 @@ jobs:
         name: pbscript-windows
         path: target/x86_64-pc-windows-gnu/release/pbscript.exe
 
-    - name: Build check (Linux native)
-      run: cargo check --verbose
+

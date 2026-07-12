@@ -10,6 +10,8 @@ use crate::domain::entities::{Key, ModeType, SequenceStep, StepAction, SwitchMod
 use crate::domain::ports::InputEnginePort;
 
 static SPRAYING: AtomicBool = AtomicBool::new(false);
+static RUNNING: AtomicBool = AtomicBool::new(false);
+static SIMULATING_CLICK: AtomicBool = AtomicBool::new(false);
 
 pub struct Listener;
 
@@ -177,18 +179,33 @@ impl Listener {
     // ---- Shared mode dispatch ----
 
     fn handle_lclick_press(state: &Arc<AppState>, engine: &Arc<dyn InputEnginePort>) {
+        if RUNNING.swap(true, Ordering::Acquire) {
+            return;
+        }
         let config = state.config.lock().unwrap();
         let mode = config.current_mode;
         drop(config);
 
         match mode {
-            ModeType::Sniper => Self::execute_sequence_sniper(state, &**engine),
-            ModeType::Shotgun => Self::execute_sequence_shotgun(state, &**engine),
-            ModeType::ArSmg => Self::start_spray(state.clone(), engine.clone()),
+            ModeType::Sniper => {
+                Self::execute_sequence_sniper(state, &**engine);
+                RUNNING.store(false, Ordering::Release);
+            }
+            ModeType::Shotgun => {
+                Self::execute_sequence_shotgun(state, &**engine);
+                RUNNING.store(false, Ordering::Release);
+            }
+            ModeType::ArSmg => {
+                RUNNING.store(false, Ordering::Release);
+                Self::start_spray(state.clone(), engine.clone());
+            }
         }
     }
 
     fn handle_lclick_release(state: &AppState) {
+        if SIMULATING_CLICK.load(Ordering::Relaxed) {
+            return;
+        }
         let config = state.config.lock().unwrap();
         let mode = config.current_mode;
         drop(config);
@@ -251,6 +268,9 @@ impl Listener {
     // ---- AR/SMG: hold-to-spray with optional recoil pull ----
 
     fn start_spray(state: Arc<AppState>, engine: Arc<dyn InputEnginePort>) {
+        if SPRAYING.swap(true, Ordering::Acquire) {
+            return;
+        }
         let config = state.config.lock().unwrap();
         let delay = config.ar_delay_ms;
         let recoil_enabled = config.ar_recoil_enabled;
@@ -258,10 +278,11 @@ impl Listener {
         drop(config);
 
         debug!("Spray start: delay={}ms, recoil={} pixels={}", delay, recoil_enabled, recoil_pixels);
-        SPRAYING.store(true, Ordering::Relaxed);
         std::thread::spawn(move || {
             while SPRAYING.load(Ordering::Relaxed) {
+                SIMULATING_CLICK.store(true, Ordering::Relaxed);
                 engine.left_click();
+                SIMULATING_CLICK.store(false, Ordering::Relaxed);
                 if recoil_enabled {
                     engine.move_mouse_relative(0, recoil_pixels);
                 }
