@@ -37,13 +37,17 @@ fn main() -> eframe::Result<()> {
     // --- Run UI ---
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([280.0, 280.0]),
+            .with_inner_size([300.0, 420.0])
+            .with_resizable(false),
         ..Default::default()
     };
 
     eframe::run_native(
         "pbscript",
         options,
-        Box::new(|_cc| Box::new(PbscriptApp::new(state))),
+        Box::new(|cc| {
+            cc.egui_ctx.set_visuals(egui::Visuals::dark());
+            Box::new(PbscriptApp::new(state))
+        }),
     )
 }

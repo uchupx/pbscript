@@ -27,6 +27,13 @@ impl PbscriptApp {
     }
 }
 
+/// Helper: draw a labeled slider with label on top, slider full width below.
+fn step_slider(ui: &mut egui::Ui, label: &str, value: &mut u32, range: std::ops::RangeInclusive<u32>) {
+    ui.label(label);
+    ui.add_sized([ui.available_width(), 0.0], Slider::new(value, range).text("ms"));
+    ui.add_space(2.0);
+}
+
 impl eframe::App for PbscriptApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         egui::CentralPanel::default().show(ctx, |ui| {
@@ -43,42 +50,27 @@ impl eframe::App for PbscriptApp {
 
             match self.config_cache.current_mode {
                 ModeType::Sniper => {
-                    // --- Sequence steps ---
-                    ui.label("Urutan:");
+                    ui.strong("Urutan:");
+                    ui.add_space(2.0);
                     egui::Frame::group(ui.style()).show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.label("1. Buka");
-                            ui.label("[R-Click]");
-                            ui.add(Slider::new(&mut self.config_cache.buka_delay_ms, 0..=100).text("ms"));
-                        });
-                        ui.horizontal(|ui| {
-                            ui.label("2. Tembak");
-                            ui.label("[L-Click]");
-                            ui.add(Slider::new(&mut self.config_cache.tembak_delay_ms, 0..=100).text("ms"));
-                        });
-                        ui.horizontal(|ui| {
-                            ui.label("3. Tutup");
-                            ui.label("[R-Click]");
-                            ui.add(Slider::new(&mut self.config_cache.tutup_delay_ms, 0..=100).text("ms"));
-                        });
-                        ui.horizontal(|ui| {
-                            ui.label("4. Ganti");
-                            ui.label(match self.config_cache.switch_mode {
-                                SwitchMode::QQ => "[QQ]",
-                                SwitchMode::Num31 => "[31]",
-                            });
-                            ui.add(Slider::new(&mut self.config_cache.ganti_delay_ms, 0..=100).text("ms"));
-                        });
+                        step_slider(ui, "1. Buka — [Klik Kanan]", &mut self.config_cache.buka_delay_ms, 0..=100);
+                        step_slider(ui, "2. Tembak — [Klik Kiri]", &mut self.config_cache.tembak_delay_ms, 0..=100);
+                        step_slider(ui, "3. Tutup — [Klik Kanan]", &mut self.config_cache.tutup_delay_ms, 0..=100);
+
+                        let ganti_label = match self.config_cache.switch_mode {
+                            SwitchMode::QQ => "4. Ganti — [QQ]",
+                            SwitchMode::Num31 => "4. Ganti — [31]",
+                        };
+                        step_slider(ui, ganti_label, &mut self.config_cache.ganti_delay_ms, 0..=100);
                     });
 
-                    // --- Switch mode ---
+                    ui.add_space(4.0);
                     ui.horizontal(|ui| {
                         ui.label("Mode Ganti:");
                         ui.radio_value(&mut self.config_cache.switch_mode, SwitchMode::QQ, "QQ");
                         ui.radio_value(&mut self.config_cache.switch_mode, SwitchMode::Num31, "31");
                     });
 
-                    // --- Toggle key ---
                     ui.horizontal(|ui| {
                         ui.label("Tombol Toggle:");
                         let mut key = self.config_cache.toggle_key.clone();
@@ -89,12 +81,11 @@ impl eframe::App for PbscriptApp {
                 }
 
                 ModeType::ArSmg => {
-                    ui.label("Spray Control:");
+                    ui.strong("Spray Control:");
+                    ui.add_space(2.0);
                     egui::Frame::group(ui.style()).show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.label("Delay Tembak");
-                            ui.add(Slider::new(&mut self.config_cache.ar_delay_ms, 0..=100).text("ms"));
-                        });
+                        step_slider(ui, "Delay Tembak", &mut self.config_cache.ar_delay_ms, 0..=100);
+
                         ui.horizontal(|ui| {
                             ui.checkbox(&mut self.config_cache.ar_recoil_enabled, "Recoil");
                             if self.config_cache.ar_recoil_enabled {
@@ -102,26 +93,25 @@ impl eframe::App for PbscriptApp {
                             }
                         });
                     });
-                    ui.label("Tekan & tahan L-Click untuk spray");
+
+                    ui.add_space(4.0);
+                    ui.label("Tekan & tahan Klik Kiri untuk spray");
                 }
 
                 ModeType::Shotgun => {
-                    ui.label("Urutan:");
+                    ui.strong("Urutan:");
+                    ui.add_space(2.0);
                     egui::Frame::group(ui.style()).show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.label("1. Tembak");
-                            ui.label("[L-Click]");
-                            ui.add(Slider::new(&mut self.config_cache.shotgun_tembak_delay_ms, 0..=100).text("ms"));
-                        });
-                        ui.horizontal(|ui| {
-                            ui.label("2. Ganti");
-                            ui.label(match self.config_cache.switch_mode {
-                                SwitchMode::QQ => "[QQ]",
-                                SwitchMode::Num31 => "[31]",
-                            });
-                            ui.add(Slider::new(&mut self.config_cache.shotgun_ganti_delay_ms, 0..=100).text("ms"));
-                        });
+                        step_slider(ui, "1. Tembak — [Klik Kiri]", &mut self.config_cache.shotgun_tembak_delay_ms, 0..=100);
+
+                        let ganti_label = match self.config_cache.switch_mode {
+                            SwitchMode::QQ => "2. Ganti — [QQ]",
+                            SwitchMode::Num31 => "2. Ganti — [31]",
+                        };
+                        step_slider(ui, ganti_label, &mut self.config_cache.shotgun_ganti_delay_ms, 0..=100);
                     });
+
+                    ui.add_space(4.0);
                     ui.horizontal(|ui| {
                         ui.label("Mode Ganti:");
                         ui.radio_value(&mut self.config_cache.switch_mode, SwitchMode::QQ, "QQ");
@@ -134,11 +124,12 @@ impl eframe::App for PbscriptApp {
 
             // --- Status ---
             let active = self.state.active.load(Ordering::Relaxed);
-            if active {
-                ui.colored_label(egui::Color32::GREEN, "\u{25a0} AKTIF");
+            let (color, icon) = if active {
+                (egui::Color32::GREEN, "\u{25cf} AKTIF")
             } else {
-                ui.colored_label(egui::Color32::RED, "\u{25a0} MATI");
-            }
+                (egui::Color32::RED, "\u{25cf} MATI")
+            };
+            ui.colored_label(color, icon);
 
             // --- Manual toggle ---
             let btn_label = if active { "Nonaktifkan" } else { "Aktifkan" };
