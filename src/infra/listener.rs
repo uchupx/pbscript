@@ -9,6 +9,154 @@ use crate::app::state::AppState;
 use crate::domain::entities::{Key, ModeType, SequenceStep, StepAction, SwitchMode};
 use crate::domain::ports::InputEnginePort;
 
+// ── Windows native hooks (replaces rdev entirely on Windows) ──
+#[cfg(windows)]
+mod win32 {
+    use std::sync::atomic::Ordering;
+    use std::sync::mpsc::{self, Sender};
+    use std::sync::{Arc, OnceLock};
+    use log::{error, info};
+    use crate::app::state::AppState;
+    use crate::domain::ports::InputEnginePort;
+    use crate::infra::listener::Listener;
+
+    // ── Win32 types & constants ──
+
+    #[repr(C)]
+    pub struct MSG {
+        hwnd: *mut std::ffi::c_void,
+        message: u32,
+        w_param: usize,
+        l_param: isize,
+        time: u32,
+        pt: POINT,
+    }
+    #[repr(C)]
+    pub struct POINT { x: i32, y: i32 }
+
+    const WH_MOUSE_LL: i32 = 14;
+    const WM_LBUTTONDOWN: u32 = 0x0201;
+    const WM_LBUTTONUP: u32 = 0x0202;
+    const WM_HOTKEY: u32 = 0x0312;
+    const MOD_NOREPEAT: u32 = 0x4000;
+
+    const VK_F1: u32 = 0x70;  const VK_F2: u32 = 0x71;
+    const VK_F3: u32 = 0x72;  const VK_F4: u32 = 0x73;
+    const VK_F5: u32 = 0x74;  const VK_F6: u32 = 0x75;
+    const VK_F7: u32 = 0x76;  const VK_F8: u32 = 0x77;
+    const VK_F9: u32 = 0x78;  const VK_F10: u32 = 0x79;
+    const VK_F11: u32 = 0x7A; const VK_F12: u32 = 0x7B;
+
+    fn vk_from_string(s: &str) -> u32 {
+        match s.to_uppercase().as_str() {
+            "F1"=>VK_F1,"F2"=>VK_F2,"F3"=>VK_F3,"F4"=>VK_F4,
+            "F5"=>VK_F5,"F6"=>VK_F6,"F7"=>VK_F7,"F8"=>VK_F8,
+            "F9"=>VK_F9,"F10"=>VK_F10,"F11"=>VK_F11,"F12"=>VK_F12,
+            _ => VK_F12,
+        }
+    }
+
+    // ── FFI ──
+
+    #[link(name = "user32")]
+    extern "system" {
+        fn SetWindowsHookExW(idHook: i32, lpfn: HOOKPROC, hmod: *mut std::ffi::c_void, dwThreadId: u32) -> *mut std::ffi::c_void;
+        fn UnhookWindowsHookEx(hhk: *mut std::ffi::c_void) -> i32;
+        fn CallNextHookEx(hhk: *mut std::ffi::c_void, nCode: i32, wParam: usize, lParam: isize) -> isize;
+        fn RegisterHotKey(hWnd: *mut std::ffi::c_void, id: i32, fsModifiers: u32, vk: u32) -> i32;
+        fn GetMessageW(msg: *mut MSG, hWnd: *mut std::ffi::c_void, wMsgFilterMin: u32, wMsgFilterMax: u32) -> i32;
+        fn GetModuleHandleW(lpModuleName: *const u16) -> *mut std::ffi::c_void;
+    }
+
+    type HOOKPROC = unsafe extern "system" fn(i32, usize, isize) -> isize;
+
+    // ── Mouse hook communication ──
+
+    #[derive(Clone, Copy)]
+    enum MouseMsg { Press, Release }
+    static MOUSE_TX: OnceLock<Sender<MouseMsg>> = OnceLock::new();
+
+    unsafe extern "system" fn mouse_proc(nCode: i32, wParam: usize, _lParam: isize) -> isize {
+        if nCode >= 0 {
+            let msg = match wParam as u32 {
+                WM_LBUTTONDOWN => Some(MouseMsg::Press),
+                WM_LBUTTONUP => Some(MouseMsg::Release),
+                _ => None,
+            };
+            if let Some(msg) = msg {
+                if let Some(tx) = MOUSE_TX.get() {
+                    let _ = tx.send(msg);
+                }
+            }
+        }
+        CallNextHookEx(std::ptr::null_mut(), nCode, wParam, _lParam)
+    }
+
+    // ── Entry point ──
+
+    pub fn spawn(state: Arc<AppState>, engine: Arc<dyn InputEnginePort>) {
+        let vk = {
+            let config = state.config.lock().unwrap();
+            vk_from_string(&config.toggle_key)
+        };
+
+        let (tx, rx) = mpsc::channel::<MouseMsg>();
+        let _ = MOUSE_TX.set(tx);
+
+        // Thread 1: Win32 hooks + message loop
+        std::thread::spawn(move || {
+            unsafe {
+                let h_mod = GetModuleHandleW(std::ptr::null());
+                let h_hook = SetWindowsHookExW(WH_MOUSE_LL, mouse_proc, h_mod, 0);
+                if h_hook.is_null() {
+                    error!("SetWindowsHookEx(WH_MOUSE_LL) failed");
+                    return;
+                }
+                if RegisterHotKey(std::ptr::null_mut(), 1, MOD_NOREPEAT, vk) == 0 {
+                    error!("RegisterHotKey failed (try running as admin)");
+                } else {
+                    info!("Win32: mouse hook + hotkey active");
+                }
+
+                let mut msg = std::mem::zeroed::<MSG>();
+                while GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0) > 0 {
+                    if msg.message == WM_HOTKEY && msg.w_param == 1 {
+                        Listener::stop_spray();
+                        let old = state.active.fetch_xor(true, Ordering::Relaxed);
+                        info!("[WinHotkey] Toggle, active: {} -> {}", old, !old);
+                    }
+                }
+                UnhookWindowsHookEx(h_hook);
+            }
+        });
+
+        // Thread 2: event processor (same logic as before)
+        std::thread::spawn(move || {
+            for msg in rx {
+                match msg {
+                    MouseMsg::Press => {
+                        if super::SIMULATING_CLICK.load(Ordering::Relaxed) {
+                            super::SIMULATING_CLICK.store(false, Ordering::Relaxed);
+                            super::RUNNING.store(false, Ordering::Release);
+                            continue;
+                        }
+                        if state.active.load(Ordering::Relaxed) {
+                            debug!("Left click press (win32), dispatching");
+                            Listener::handle_lclick_press(&state, &engine);
+                        }
+                    }
+                    MouseMsg::Release => {
+                        if super::SIMULATING_CLICK.load(Ordering::Relaxed) {
+                            continue;
+                        }
+                        Listener::handle_lclick_release(&state);
+                    }
+                }
+            }
+        });
+    }
+}
+
 static SPRAYING: AtomicBool = AtomicBool::new(false);
 static RUNNING: AtomicBool = AtomicBool::new(false);
 static SIMULATING_CLICK: AtomicBool = AtomicBool::new(false);
@@ -20,8 +168,11 @@ impl Listener {
         #[cfg(target_os = "linux")]
         Self::spawn_linux(state, engine);
 
-        #[cfg(not(target_os = "linux"))]
-        Self::spawn_other(state, engine);
+        #[cfg(target_os = "windows")]
+        win32::spawn(state, engine);
+
+        #[cfg(target_os = "macos")]
+        Self::spawn_macos(state, engine);
     }
 
     // ---- Linux: evdev (non-exclusive, works on X11 + Wayland) ----
@@ -121,10 +272,10 @@ impl Listener {
         }
     }
 
-    // ---- Non-Linux (Windows / macOS): rdev listen (channel-based, avoids blocking inside hook) ----
+    // ---- macOS: rdev listen (channel-based, avoids blocking inside hook) ----
 
-    #[cfg(not(target_os = "linux"))]
-    fn spawn_other(state: Arc<AppState>, engine: Arc<dyn InputEnginePort>) {
+    #[cfg(target_os = "macos")]
+    fn spawn_macos(state: Arc<AppState>, engine: Arc<dyn InputEnginePort>) {
         use rdev::{listen, Event, EventType};
 
         let (tx, rx) = mpsc::channel::<Event>();
@@ -174,7 +325,7 @@ impl Listener {
         });
     }
 
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(target_os = "macos")]
     fn toggle_key_rdev(state: &AppState) -> rdev::Key {
         let config = state.config.lock().unwrap();
         let key = config.toggle_key.to_uppercase();
@@ -318,7 +469,7 @@ impl Listener {
         });
     }
 
-    fn stop_spray() {
+    pub fn stop_spray() {
         SPRAYING.store(false, Ordering::Relaxed);
     }
 
