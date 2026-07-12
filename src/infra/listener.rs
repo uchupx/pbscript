@@ -63,6 +63,9 @@ mod win32 {
         let (tx, rx) = mpsc::channel::<HookMsg>();
         let _ = HOOK_TX.set(tx);
 
+        // Polling thread only needs state; processor thread gets its own clone + engine
+        let state_proc = state.clone();
+
         // Thread 1: polling loop — reads physical key state 1000x/sec
         // ponytail: 1ms polling is fine for 60fps game input
         thread::spawn(move || {
@@ -106,7 +109,6 @@ mod win32 {
 
         // Thread 2: event processor (same as before)
         info!("Win32 event processor started");
-        let engine2 = engine.clone();
         thread::spawn(move || {
             for msg in rx {
                 match msg {
@@ -116,20 +118,20 @@ mod win32 {
                             super::RUNNING.store(false, Ordering::Release);
                             continue;
                         }
-                        if state.active.load(Ordering::Relaxed) {
+                        if state_proc.active.load(Ordering::Relaxed) {
                             debug!("Left click press (win32), dispatching");
-                            Listener::handle_lclick_press(&state, &engine2);
+                            Listener::handle_lclick_press(&state_proc, &engine);
                         }
                     }
                     HookMsg::Release => {
                         if super::SIMULATING_CLICK.load(Ordering::Relaxed) {
                             continue;
                         }
-                        Listener::handle_lclick_release(&state);
+                        Listener::handle_lclick_release(&state_proc);
                     }
                     HookMsg::Toggle => {
                         Listener::stop_spray();
-                        let old = state.active.fetch_xor(true, Ordering::Relaxed);
+                        let old = state_proc.active.fetch_xor(true, Ordering::Relaxed);
                         info!("[PollWin32] Toggle, active: {} -> {}", old, !old);
                     }
                 }
