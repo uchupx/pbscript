@@ -14,7 +14,7 @@ use infra::listener::Listener;
 use infra::ui_eframe::PbscriptApp;
 
 fn main() -> eframe::Result<()> {
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     info!("Starting pbscript...");
 
     // --- Config ---
@@ -38,10 +38,7 @@ fn main() -> eframe::Result<()> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([300.0, 420.0])
-            .with_resizable(false)
-            .with_decorations(false)
-            .with_always_on_top()
-            .with_transparent(true),
+            .with_resizable(false),
         ..Default::default()
     };
 

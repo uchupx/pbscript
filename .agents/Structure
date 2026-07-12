@@ -1,6 +1,7 @@
 pbscript/
 ├── Cargo.toml
 ├── Cargo.lock
+├── debug.bat
 ├── .github/
 ├── docs/
 │   └── superpowers/

@@ -35,7 +35,7 @@ Modes:
 UI Design:
   - Dark theme (egui::Visuals::dark)
   - Fixed window 300x420, non-resizable
-  - Overlay mode: always-on-top, transparent background, no decorations
+  - Always-on-top window (stays above game), fixed 300x420
   - Vertical layout: label on top, full-width slider below
   - Bahasa Indonesia labels throughout
 

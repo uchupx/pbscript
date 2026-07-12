@@ -36,12 +36,7 @@ fn step_slider(ui: &mut egui::Ui, label: &str, value: &mut u32, range: std::ops:
 
 impl eframe::App for PbscriptApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        egui::CentralPanel::default()
-            .frame(egui::Frame {
-                fill: egui::Color32::TRANSPARENT,
-                ..Default::default()
-            })
-            .show(ctx, |ui| {
+        egui::CentralPanel::default().show(ctx, |ui| {
             ui.heading("pbscript");
             ui.separator();
 

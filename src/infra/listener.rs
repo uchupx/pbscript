@@ -137,6 +137,7 @@ mod win32 {
         });
 
         // Thread 2: event processor (same logic as before)
+        info!("Win32 event processor started");
         std::thread::spawn(move || {
             for msg in rx {
                 match msg {
