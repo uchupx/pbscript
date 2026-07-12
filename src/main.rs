@@ -40,7 +40,7 @@ fn main() -> eframe::Result<()> {
             .with_inner_size([300.0, 420.0])
             .with_resizable(false)
             .with_decorations(false)
-            .with_always_on_top(true)
+            .with_always_on_top()
             .with_transparent(true),
         ..Default::default()
     };
