@@ -106,6 +106,9 @@ mod win32 {
         let (tx, rx) = mpsc::channel::<MouseMsg>();
         let _ = MOUSE_TX.set(tx);
 
+        let state2 = state.clone();
+        let engine2 = engine.clone();
+
         // Thread 1: Win32 hooks + message loop
         std::thread::spawn(move || {
             unsafe {
@@ -143,16 +146,16 @@ mod win32 {
                             super::RUNNING.store(false, Ordering::Release);
                             continue;
                         }
-                        if state.active.load(Ordering::Relaxed) {
+                        if state2.active.load(Ordering::Relaxed) {
                             debug!("Left click press (win32), dispatching");
-                            Listener::handle_lclick_press(&state, &engine);
+                            Listener::handle_lclick_press(&state2, &engine2);
                         }
                     }
                     MouseMsg::Release => {
                         if super::SIMULATING_CLICK.load(Ordering::Relaxed) {
                             continue;
                         }
-                        Listener::handle_lclick_release(&state);
+                        Listener::handle_lclick_release(&state2);
                     }
                 }
             }
