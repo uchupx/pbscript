@@ -38,10 +38,10 @@ mod win32 {
     pub struct POINT { x: i32, y: i32 }
 
     const WH_MOUSE_LL: i32 = 14;
+    const WH_KEYBOARD_LL: i32 = 13;
     const WM_LBUTTONDOWN: u32 = 0x0201;
     const WM_LBUTTONUP: u32 = 0x0202;
-    const WM_HOTKEY: u32 = 0x0312;
-    const MOD_NOREPEAT: u32 = 0x4000;
+    const WM_KEYDOWN: u32 = 0x0100;
 
     const VK_F1: u32 = 0x70;  const VK_F2: u32 = 0x71;
     const VK_F3: u32 = 0x72;  const VK_F4: u32 = 0x73;
@@ -66,33 +66,57 @@ mod win32 {
         fn SetWindowsHookExW(idHook: i32, lpfn: HOOKPROC, hmod: *mut std::ffi::c_void, dwThreadId: u32) -> *mut std::ffi::c_void;
         fn UnhookWindowsHookEx(hhk: *mut std::ffi::c_void) -> i32;
         fn CallNextHookEx(hhk: *mut std::ffi::c_void, nCode: i32, wParam: usize, lParam: isize) -> isize;
-        fn RegisterHotKey(hWnd: *mut std::ffi::c_void, id: i32, fsModifiers: u32, vk: u32) -> i32;
         fn GetMessageW(msg: *mut MSG, hWnd: *mut std::ffi::c_void, wMsgFilterMin: u32, wMsgFilterMax: u32) -> i32;
         fn GetModuleHandleW(lpModuleName: *const u16) -> *mut std::ffi::c_void;
     }
 
     type HOOKPROC = unsafe extern "system" fn(i32, usize, isize) -> isize;
 
-    // ── Mouse hook communication ──
+    // ── Hook communication ──
 
     #[derive(Clone, Copy)]
-    enum MouseMsg { Press, Release }
-    static MOUSE_TX: OnceLock<Sender<MouseMsg>> = OnceLock::new();
+    enum HookMsg { Press, Release, Toggle }
+    static HOOK_TX: OnceLock<Sender<HookMsg>> = OnceLock::new();
 
     unsafe extern "system" fn mouse_proc(nCode: i32, wParam: usize, _lParam: isize) -> isize {
         if nCode >= 0 {
             let msg = match wParam as u32 {
-                WM_LBUTTONDOWN => Some(MouseMsg::Press),
-                WM_LBUTTONUP => Some(MouseMsg::Release),
+                WM_LBUTTONDOWN => Some(HookMsg::Press),
+                WM_LBUTTONUP => Some(HookMsg::Release),
                 _ => None,
             };
             if let Some(msg) = msg {
-                if let Some(tx) = MOUSE_TX.get() {
+                if let Some(tx) = HOOK_TX.get() {
                     let _ = tx.send(msg);
                 }
             }
         }
         CallNextHookEx(std::ptr::null_mut(), nCode, wParam, _lParam)
+    }
+
+    #[repr(C)]
+    struct KBDLLHOOKSTRUCT {
+        vkCode: u32,
+        scanCode: u32,
+        flags: u32,
+        time: u32,
+        dwExtraInfo: usize,
+    }
+
+    static TOGGLE_VK: OnceLock<u32> = OnceLock::new();
+
+    unsafe extern "system" fn keyboard_proc(nCode: i32, wParam: usize, lParam: isize) -> isize {
+        if nCode >= 0 && wParam as u32 == WM_KEYDOWN {
+            let kb = &*(lParam as *const KBDLLHOOKSTRUCT);
+            if let Some(toggle_vk) = TOGGLE_VK.get() {
+                if kb.vkCode == *toggle_vk {
+                    if let Some(tx) = HOOK_TX.get() {
+                        let _ = tx.send(HookMsg::Toggle);
+                    }
+                }
+            }
+        }
+        CallNextHookEx(std::ptr::null_mut(), nCode, wParam, lParam)
     }
 
     // ── Entry point ──
@@ -103,8 +127,9 @@ mod win32 {
             vk_from_string(&config.toggle_key)
         };
 
-        let (tx, rx) = mpsc::channel::<MouseMsg>();
-        let _ = MOUSE_TX.set(tx);
+        let (tx, rx) = mpsc::channel::<HookMsg>();
+        let _ = HOOK_TX.set(tx);
+        let _ = TOGGLE_VK.set(vk);
 
         let state2 = state.clone();
         let engine2 = engine.clone();
@@ -113,35 +138,31 @@ mod win32 {
         std::thread::spawn(move || {
             unsafe {
                 let h_mod = GetModuleHandleW(std::ptr::null());
-                let h_hook = SetWindowsHookExW(WH_MOUSE_LL, mouse_proc, h_mod, 0);
-                if h_hook.is_null() {
+                let h_mouse = SetWindowsHookExW(WH_MOUSE_LL, mouse_proc, h_mod, 0);
+                if h_mouse.is_null() {
                     error!("SetWindowsHookEx(WH_MOUSE_LL) failed");
                     return;
                 }
-                if RegisterHotKey(std::ptr::null_mut(), 1, MOD_NOREPEAT, vk) == 0 {
-                    error!("RegisterHotKey failed (try running as admin)");
+                let h_kbd = SetWindowsHookExW(WH_KEYBOARD_LL, keyboard_proc, h_mod, 0);
+                if h_kbd.is_null() {
+                    error!("SetWindowsHookEx(WH_KEYBOARD_LL) failed");
                 } else {
-                    info!("Win32: mouse hook + hotkey active");
+                    info!("Win32: mouse + keyboard hooks active");
                 }
 
                 let mut msg = std::mem::zeroed::<MSG>();
-                while GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0) > 0 {
-                    if msg.message == WM_HOTKEY && msg.w_param == 1 {
-                        Listener::stop_spray();
-                        let old = state.active.fetch_xor(true, Ordering::Relaxed);
-                        info!("[WinHotkey] Toggle, active: {} -> {}", old, !old);
-                    }
-                }
-                UnhookWindowsHookEx(h_hook);
+                while GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0) > 0 {}
+                UnhookWindowsHookEx(h_mouse);
+                if !h_kbd.is_null() { UnhookWindowsHookEx(h_kbd); }
             }
         });
 
-        // Thread 2: event processor (same logic as before)
+        // Thread 2: event processor
         info!("Win32 event processor started");
         std::thread::spawn(move || {
             for msg in rx {
                 match msg {
-                    MouseMsg::Press => {
+                    HookMsg::Press => {
                         if super::SIMULATING_CLICK.load(Ordering::Relaxed) {
                             super::SIMULATING_CLICK.store(false, Ordering::Relaxed);
                             super::RUNNING.store(false, Ordering::Release);
@@ -152,11 +173,16 @@ mod win32 {
                             Listener::handle_lclick_press(&state2, &engine2);
                         }
                     }
-                    MouseMsg::Release => {
+                    HookMsg::Release => {
                         if super::SIMULATING_CLICK.load(Ordering::Relaxed) {
                             continue;
                         }
                         Listener::handle_lclick_release(&state2);
+                    }
+                    HookMsg::Toggle => {
+                        Listener::stop_spray();
+                        let old = state2.active.fetch_xor(true, Ordering::Relaxed);
+                        info!("[WinHook] Toggle, active: {} -> {}", old, !old);
                     }
                 }
             }
