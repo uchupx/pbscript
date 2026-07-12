@@ -108,15 +108,26 @@ impl Listener {
         }
     }
 
-    // ---- Non-Linux (Windows / macOS): rdev listen ----
+    // ---- Non-Linux (Windows / macOS): rdev listen (channel-based, avoids blocking inside hook) ----
 
     #[cfg(not(target_os = "linux"))]
     fn spawn_other(state: Arc<AppState>, engine: Arc<dyn InputEnginePort>) {
         use rdev::{listen, Event, EventType};
 
-        info!("Listener thread started (rdev listen)");
+        let (tx, rx) = mpsc::channel::<Event>();
+
+        // Thread 1: rdev listen — must NOT block inside the callback (runs in hook context on Windows)
         std::thread::spawn(move || {
             let result = listen(move |event: Event| {
+                let _ = tx.send(event);
+            });
+            error!("listen() returned: {:?}", result);
+        });
+
+        // Thread 2: event processing — can block freely
+        info!("Listener thread started (rdev, channel-based)");
+        std::thread::spawn(move || {
+            for event in rx {
                 match event.event_type {
                     EventType::ButtonPress(rdev::Button::Left) => {
                         if state.active.load(Ordering::Relaxed) {
@@ -137,8 +148,7 @@ impl Listener {
                     }
                     _ => {}
                 }
-            });
-            error!("listen() returned: {:?}", result);
+            }
         });
     }
 
