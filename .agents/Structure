@@ -25,10 +25,12 @@ pbscript/
 │       ├── mod.rs
 │       ├── ui_eframe.rs           # egui UI: PbscriptApp, 3 mode tabs with sliders
 │       ├── config_toml.rs         # ConfigToml: TOML file persistence
-│       ├── listener.rs            # Global key listener: evdev (Linux) / rdev (other), mode dispatch
+│   ├── listener.rs            # Global listener: evdev (Linux) / Win32 GetAsyncKeyState poll (Windows) / rdev (macOS)
+│   │   └── win32 module       # GetAsyncKeyState polling loop (1ms), no hooks
 │       └── input_enigo.rs         # InputEngineEnigo: enigo-based input simulation + move_mouse
 └── .agents/
     ├── Structure
     ├── Tech
     ├── Schema
-    └── TODO
+    ├── TODO
+    └── session-summary.md        # Active session context & debugging state

@@ -25,7 +25,7 @@ Architecture:
   - AtomicBool (static SPRAYING) for AR/SMG spray loop control
   - Mutex<AppConfig> for shared config access
   - Mode dispatch: handle_lclick_press/release routes to mode-specific logic
-  - Platform-conditional listener: evdev on Linux, Win32 native hooks (SetWindowsHookEx WH_MOUSE_LL + RegisterHotKey) on Windows, rdev on macOS
+  - Platform-conditional listener: evdev on Linux, Win32 GetAsyncKeyState polling (1ms interval) on Windows, rdev on macOS
 
 Modes:
   - Sniper: 4-step sequence (RClick → LClick → RClick → Switch), trigger on L-Click
@@ -35,7 +35,6 @@ Modes:
 UI Design:
   - Dark theme (egui::Visuals::dark)
   - Fixed window 300x420, non-resizable
-  - Always-on-top window (stays above game), fixed 300x420
   - Vertical layout: label on top, full-width slider below
   - Bahasa Indonesia labels throughout
 

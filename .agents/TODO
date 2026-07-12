@@ -1,1 +1,9 @@
-No pending tasks.
+## Pending
+- [ ] Test `GetAsyncKeyState` polling — build, push, run `debug.bat`
+- [ ] Add tray icon atau minimize-to-tray
+
+## Notes
+- **Raw Input API** — fallback if polling bermasalah dengan anti-cheat tertentu.
+  Registrasi: `RegisterRawInputDevices(usUsage=0x01/mouse, RIDEV_INPUTSINK)`.
+  Butuh hidden window (`HWND_MESSAGE`) + message pump + `WM_INPUT` handler.
+  Referensi: https://learn.microsoft.com/en-us/windows/win32/inputdev/using-raw-input

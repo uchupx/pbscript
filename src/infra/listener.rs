@@ -12,45 +12,30 @@ use crate::app::state::AppState;
 use crate::domain::entities::{Key, ModeType, SequenceStep, StepAction, SwitchMode};
 use crate::domain::ports::InputEnginePort;
 
-// ── Windows native hooks (replaces rdev entirely on Windows) ──
+// ── Windows: GetAsyncKeyState polling (bypasses anti-cheat hook blocking) ──
 #[cfg(windows)]
 mod win32 {
     use std::sync::atomic::Ordering;
     use std::sync::mpsc::{self, Sender};
     use std::sync::{Arc, OnceLock};
-    use log::{debug, error, info};
+    use std::thread;
+    use std::time::Duration;
+    use log::{debug, info};
     use crate::app::state::AppState;
     use crate::domain::ports::InputEnginePort;
     use crate::infra::listener::Listener;
 
-    // ── Win32 types & constants ──
+    // ── Constants ──
 
-    #[repr(C)]
-    pub struct MSG {
-        hwnd: *mut std::ffi::c_void,
-        message: u32,
-        w_param: usize,
-        l_param: isize,
-        time: u32,
-        pt: POINT,
-    }
-    #[repr(C)]
-    pub struct POINT { x: i32, y: i32 }
+    const VK_LBUTTON: i32 = 0x01;
+    const VK_F1: i32 = 0x70;  const VK_F2: i32 = 0x71;
+    const VK_F3: i32 = 0x72;  const VK_F4: i32 = 0x73;
+    const VK_F5: i32 = 0x74;  const VK_F6: i32 = 0x75;
+    const VK_F7: i32 = 0x76;  const VK_F8: i32 = 0x77;
+    const VK_F9: i32 = 0x78;  const VK_F10: i32 = 0x79;
+    const VK_F11: i32 = 0x7A; const VK_F12: i32 = 0x7B;
 
-    const WH_MOUSE_LL: i32 = 14;
-    const WH_KEYBOARD_LL: i32 = 13;
-    const WM_LBUTTONDOWN: u32 = 0x0201;
-    const WM_LBUTTONUP: u32 = 0x0202;
-    const WM_KEYDOWN: u32 = 0x0100;
-
-    const VK_F1: u32 = 0x70;  const VK_F2: u32 = 0x71;
-    const VK_F3: u32 = 0x72;  const VK_F4: u32 = 0x73;
-    const VK_F5: u32 = 0x74;  const VK_F6: u32 = 0x75;
-    const VK_F7: u32 = 0x76;  const VK_F8: u32 = 0x77;
-    const VK_F9: u32 = 0x78;  const VK_F10: u32 = 0x79;
-    const VK_F11: u32 = 0x7A; const VK_F12: u32 = 0x7B;
-
-    fn vk_from_string(s: &str) -> u32 {
+    fn vk_from_string(s: &str) -> i32 {
         match s.to_uppercase().as_str() {
             "F1"=>VK_F1,"F2"=>VK_F2,"F3"=>VK_F3,"F4"=>VK_F4,
             "F5"=>VK_F5,"F6"=>VK_F6,"F7"=>VK_F7,"F8"=>VK_F8,
@@ -59,107 +44,70 @@ mod win32 {
         }
     }
 
-    // ── FFI ──
+    // ── FFI (only 1 function needed) ──
 
     #[link(name = "user32")]
     extern "system" {
-        fn SetWindowsHookExW(idHook: i32, lpfn: HOOKPROC, hmod: *mut std::ffi::c_void, dwThreadId: u32) -> *mut std::ffi::c_void;
-        fn UnhookWindowsHookEx(hhk: *mut std::ffi::c_void) -> i32;
-        fn CallNextHookEx(hhk: *mut std::ffi::c_void, nCode: i32, wParam: usize, lParam: isize) -> isize;
-        fn GetMessageW(msg: *mut MSG, hWnd: *mut std::ffi::c_void, wMsgFilterMin: u32, wMsgFilterMax: u32) -> i32;
-        fn GetModuleHandleW(lpModuleName: *const u16) -> *mut std::ffi::c_void;
+        fn GetAsyncKeyState(vKey: i32) -> i16;
     }
 
-    type HOOKPROC = unsafe extern "system" fn(i32, usize, isize) -> isize;
-
-    // ── Hook communication ──
+    // ── Polling communication ──
 
     #[derive(Clone, Copy)]
     enum HookMsg { Press, Release, Toggle }
     static HOOK_TX: OnceLock<Sender<HookMsg>> = OnceLock::new();
 
-    unsafe extern "system" fn mouse_proc(nCode: i32, wParam: usize, _lParam: isize) -> isize {
-        if nCode >= 0 {
-            let msg = match wParam as u32 {
-                WM_LBUTTONDOWN => Some(HookMsg::Press),
-                WM_LBUTTONUP => Some(HookMsg::Release),
-                _ => None,
-            };
-            if let Some(msg) = msg {
-                if let Some(tx) = HOOK_TX.get() {
-                    let _ = tx.send(msg);
+    // ── Entry point ──
+
+    pub fn spawn(state: Arc<AppState>, engine: Arc<dyn InputEnginePort>) {
+        let (tx, rx) = mpsc::channel::<HookMsg>();
+        let _ = HOOK_TX.set(tx);
+
+        // Thread 1: polling loop — reads physical key state 1000x/sec
+        // ponytail: 1ms polling is fine for 60fps game input
+        thread::spawn(move || {
+            info!("Win32: polling started (1ms interval)");
+
+            let mut prev_lbutton = false;
+            let mut prev_toggle = false;
+
+            loop {
+                // Read toggle key from config (user may change it in UI)
+                let toggle_vk = {
+                    let config = state.config.lock().unwrap();
+                    vk_from_string(&config.toggle_key)
+                };
+
+                // Left mouse button edge detection
+                let lbutton_down = unsafe { (GetAsyncKeyState(VK_LBUTTON) as u16) & 0x8000 != 0 };
+                if lbutton_down && !prev_lbutton {
+                    if let Some(tx) = HOOK_TX.get() {
+                        let _ = tx.send(HookMsg::Press);
+                    }
+                } else if !lbutton_down && prev_lbutton {
+                    if let Some(tx) = HOOK_TX.get() {
+                        let _ = tx.send(HookMsg::Release);
+                    }
                 }
-            }
-        }
-        CallNextHookEx(std::ptr::null_mut(), nCode, wParam, _lParam)
-    }
+                prev_lbutton = lbutton_down;
 
-    #[repr(C)]
-    struct KBDLLHOOKSTRUCT {
-        vkCode: u32,
-        scanCode: u32,
-        flags: u32,
-        time: u32,
-        dwExtraInfo: usize,
-    }
-
-    static TOGGLE_VK: OnceLock<u32> = OnceLock::new();
-
-    unsafe extern "system" fn keyboard_proc(nCode: i32, wParam: usize, lParam: isize) -> isize {
-        if nCode >= 0 && wParam as u32 == WM_KEYDOWN {
-            let kb = &*(lParam as *const KBDLLHOOKSTRUCT);
-            if let Some(toggle_vk) = TOGGLE_VK.get() {
-                if kb.vkCode == *toggle_vk {
+                // Toggle key edge detection
+                let toggle_down = unsafe { (GetAsyncKeyState(toggle_vk) as u16) & 0x8000 != 0 };
+                if toggle_down && !prev_toggle {
                     if let Some(tx) = HOOK_TX.get() {
                         let _ = tx.send(HookMsg::Toggle);
                     }
                 }
-            }
-        }
-        CallNextHookEx(std::ptr::null_mut(), nCode, wParam, lParam)
-    }
+                prev_toggle = toggle_down;
 
-    // ── Entry point ──
-
-    pub fn spawn(state: Arc<AppState>, engine: Arc<dyn InputEnginePort>) {
-        let vk = {
-            let config = state.config.lock().unwrap();
-            vk_from_string(&config.toggle_key)
-        };
-
-        let (tx, rx) = mpsc::channel::<HookMsg>();
-        let _ = HOOK_TX.set(tx);
-        let _ = TOGGLE_VK.set(vk);
-
-        let state2 = state.clone();
-        let engine2 = engine.clone();
-
-        // Thread 1: Win32 hooks + message loop
-        std::thread::spawn(move || {
-            unsafe {
-                let h_mod = GetModuleHandleW(std::ptr::null());
-                let h_mouse = SetWindowsHookExW(WH_MOUSE_LL, mouse_proc, h_mod, 0);
-                if h_mouse.is_null() {
-                    error!("SetWindowsHookEx(WH_MOUSE_LL) failed");
-                    return;
-                }
-                let h_kbd = SetWindowsHookExW(WH_KEYBOARD_LL, keyboard_proc, h_mod, 0);
-                if h_kbd.is_null() {
-                    error!("SetWindowsHookEx(WH_KEYBOARD_LL) failed");
-                } else {
-                    info!("Win32: mouse + keyboard hooks active");
-                }
-
-                let mut msg = std::mem::zeroed::<MSG>();
-                while GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0) > 0 {}
-                UnhookWindowsHookEx(h_mouse);
-                if !h_kbd.is_null() { UnhookWindowsHookEx(h_kbd); }
+                thread::sleep(Duration::from_millis(1));
             }
         });
 
-        // Thread 2: event processor
+        // Thread 2: event processor (same as before)
         info!("Win32 event processor started");
-        std::thread::spawn(move || {
+        let engine2 = engine.clone();
+        thread::spawn(move || {
             for msg in rx {
                 match msg {
                     HookMsg::Press => {
@@ -168,21 +116,21 @@ mod win32 {
                             super::RUNNING.store(false, Ordering::Release);
                             continue;
                         }
-                        if state2.active.load(Ordering::Relaxed) {
+                        if state.active.load(Ordering::Relaxed) {
                             debug!("Left click press (win32), dispatching");
-                            Listener::handle_lclick_press(&state2, &engine2);
+                            Listener::handle_lclick_press(&state, &engine2);
                         }
                     }
                     HookMsg::Release => {
                         if super::SIMULATING_CLICK.load(Ordering::Relaxed) {
                             continue;
                         }
-                        Listener::handle_lclick_release(&state2);
+                        Listener::handle_lclick_release(&state);
                     }
                     HookMsg::Toggle => {
                         Listener::stop_spray();
-                        let old = state2.active.fetch_xor(true, Ordering::Relaxed);
-                        info!("[WinHook] Toggle, active: {} -> {}", old, !old);
+                        let old = state.active.fetch_xor(true, Ordering::Relaxed);
+                        info!("[PollWin32] Toggle, active: {} -> {}", old, !old);
                     }
                 }
             }

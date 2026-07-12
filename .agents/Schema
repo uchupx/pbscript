@@ -84,9 +84,18 @@ struct PbscriptApp {
 
 static SPRAYING: AtomicBool;          // Guards spray loop re-entry
 static RUNNING: AtomicBool;          // Guards sequence re-entry
-static SIMULATING_CLICK: AtomicBool; // Guards against feedback loop (simulated events looped back via listener)
+static SIMULATING_CLICK: AtomicBool; // Guards feedback loop (sim events ignored)
+
+// Threads (Windows):
+//   Thread 1 (polling): loop 1ms sleep — GetAsyncKeyState() left button + toggle key edge detect
+//     - VK_LBUTTON press → HookMsg::Press, VK_LBUTTON release → HookMsg::Release
+//     - toggle key press → HookMsg::Toggle
+//     - Reads toggle_key from config each iteration (user may change in UI)
+//   Thread 2 (processor): reads HookMsg channel → Press/Release/Toggle
+//     (same as before, unchanged)
+
 // Methods: handle_lclick_press, handle_lclick_release,
 //          execute_sequence_sniper, execute_sequence_shotgun,
 //          start_spray, stop_spray, do_switch
-// Event flow: sim click → SIMULATING_CLICK on → event loop skips simulated ButtonPress(Left)
-//             and clears SIMULATING_CLICK + RUNNING
+// Event flow: sim click → SIMULATING_CLICK on → polling detects physical click but
+//             processor loop skips it → clears SIMULATING_CLICK + RUNNING
