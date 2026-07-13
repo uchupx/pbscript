@@ -19,6 +19,7 @@ mod win32 {
     use std::sync::mpsc::{self, Sender};
     use std::sync::{Arc, OnceLock};
     use std::thread;
+    use std::time::Duration;
     use log::{debug, info};
     use crate::app::state::AppState;
     use crate::domain::entities::TriggerButton;
@@ -77,7 +78,7 @@ mod win32 {
         let state_proc = state.clone();
         let engine_proc = engine.clone();
 
-        // Thread 1: polling loop (8ms ≈ 125 Hz, balances CPU and responsiveness)
+        // Thread 1: polling loop (2ms ≈ 500 Hz, responsive without crushing CPU)
         thread::spawn(move || {
             info!("GetAsyncKeyState: polling started");
             let mut prev_trigger = false;
@@ -103,7 +104,7 @@ mod win32 {
                 prev_trigger = cur_trigger;
                 prev_toggle = cur_toggle;
 
-                thread::sleep(Duration::from_millis(8));
+                thread::sleep(Duration::from_millis(2));
             }
         });
 
