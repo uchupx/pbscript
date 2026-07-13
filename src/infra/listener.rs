@@ -178,6 +178,7 @@ const RI_MOUSE_BUTTON_5_UP: WORD = 0x0200;
             wMsgFilterMin: UINT, wMsgFilterMax: UINT,
         ) -> BOOL;
         fn DispatchMessageW(lpMsg: *const MSG) -> LRESULT;
+        fn TranslateMessage(lpMsg: *const MSG) -> BOOL;
         fn RegisterClassW(lpWndClass: *const WNDCLASSW) -> ATOM;
     }
 
@@ -197,11 +198,12 @@ const RI_MOUSE_BUTTON_5_UP: WORD = 0x0200;
         hwnd: HWND, msg: UINT, wparam: WPARAM, lparam: LPARAM,
     ) -> LRESULT {
         if msg == WM_INPUT {
+            eprintln!("[RAW] WM_INPUT received, lparam={}", lparam);
             handle_raw_input(lparam);
             return 0;
         }
         if msg == WM_DESTROY {
-            // ponytail: no PostQuitMessage needed — GetMessageW returns 0
+            eprintln!("[RAW] WM_DESTROY");
         }
         DefWindowProcW(hwnd, msg, wparam, lparam)
     }
@@ -325,9 +327,10 @@ const RI_MOUSE_BUTTON_5_UP: WORD = 0x0200;
                     std::ptr::null_mut(),
                 );
                 if hwnd.is_null() {
-                    info!("RawInput: CreateWindowExW failed");
+                    info!("RawInput: CreateWindowExW failed (HWND null)");
                     return;
                 }
+                info!("RawInput: msg-only window created HWND={:?}", hwnd);
 
                 // Register raw input devices (mouse + keyboard)
                 let devices = [
@@ -350,9 +353,11 @@ const RI_MOUSE_BUTTON_5_UP: WORD = 0x0200;
                     std::mem::size_of::<RAWINPUTDEVICE>() as DWORD,
                 );
                 if ok == FALSE {
-                    info!("RawInput: RegisterRawInputDevices failed");
+                    // GetLastError would be nice, but we can't easily call it
+                    info!("RawInput: RegisterRawInputDevices failed (thread {:?})", std::thread::current().id());
                     return;
                 }
+                info!("RawInput: devices registered OK");
 
                 info!("RawInput: pump started (msg-only window)");
 
@@ -364,6 +369,8 @@ const RI_MOUSE_BUTTON_5_UP: WORD = 0x0200;
                         // WM_QUIT or error
                         break;
                     }
+                    // TranslateMessage memastikan keyboard messages diproses (needed for some cases)
+                    TranslateMessage(&msg);
                     DispatchMessageW(&msg);
                 }
             }
