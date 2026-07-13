@@ -25,7 +25,8 @@ Architecture:
   - AtomicBool (static SPRAYING) for AR/SMG spray loop control
   - Mutex<AppConfig> for shared config access
   - Mode dispatch: handle_lclick_press/release routes to mode-specific logic
-  - Platform-conditional listener: evdev on Linux, Win32 Raw Input API (RegisterRawInputDevices + WM_INPUT, HWND_MESSAGE pump) on Windows, rdev on macOS
+   - Platform-conditional listener: evdev on Linux, Win32 low-level hooks (WH_MOUSE_LL + WH_KEYBOARD_LL via SetWindowsHookExA, event-driven message pump) on Windows, rdev on macOS
+   - Mouse click output: raw Windows SendInput FFI (user32!SendInput) — bypasses enigo for better game/anti-cheat compatibility
 
 Modes:
   - Sniper: 4-step sequence (RClick → LClick → RClick → Switch), trigger on L-Click

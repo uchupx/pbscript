@@ -12,33 +12,49 @@ use crate::app::state::AppState;
 use crate::domain::entities::{Key, ModeType, SequenceStep, StepAction, SwitchMode};
 use crate::domain::ports::InputEnginePort;
 
-// ── Windows: GetAsyncKeyState polling loop (simpler than Raw Input API) ──
+// ── Windows: low-level mouse + keyboard hooks (event-driven, no polling) ──
 #[cfg(windows)]
 mod win32 {
+    use std::mem;
+    use std::ptr;
     use std::sync::atomic::Ordering;
     use std::sync::mpsc::{self, Sender};
     use std::sync::{Arc, OnceLock};
     use std::thread;
-    use std::time::Duration;
     use log::{debug, info};
     use crate::app::state::AppState;
     use crate::domain::entities::TriggerButton;
     use crate::domain::ports::InputEnginePort;
     use crate::infra::listener::Listener;
 
+    // ── Hook IDs ──
+    const WH_MOUSE_LL: i32 = 14;
+    const WH_KEYBOARD_LL: i32 = 13;
+
+    // ── Mouse messages ──
+    const WM_LBUTTONDOWN: u32 = 0x0201;
+    const WM_LBUTTONUP: u32 = 0x0202;
+    const WM_RBUTTONDOWN: u32 = 0x0204;
+    const WM_RBUTTONUP: u32 = 0x0205;
+    const WM_XBUTTONDOWN: u32 = 0x020B;
+    const WM_XBUTTONUP: u32 = 0x020C;
+    const WM_KEYDOWN: u32 = 0x0100;
+
+    const XBUTTON1: u32 = 0x0001;
+    const XBUTTON2: u32 = 0x0002;
+
     // ── Virtual key codes ──
-    const VK_LBUTTON: i32 = 0x01;
-    const VK_XBUTTON1: i32 = 0x05; // Backward
-    const VK_XBUTTON2: i32 = 0x06; // Forward
+    const VK_LBUTTON: u32 = 0x01;
+    const VK_XBUTTON1: u32 = 0x05; // Backward
+    const VK_XBUTTON2: u32 = 0x06; // Forward
+    const VK_F1: u32 = 0x70;  const VK_F2: u32 = 0x71;
+    const VK_F3: u32 = 0x72;  const VK_F4: u32 = 0x73;
+    const VK_F5: u32 = 0x74;  const VK_F6: u32 = 0x75;
+    const VK_F7: u32 = 0x76;  const VK_F8: u32 = 0x77;
+    const VK_F9: u32 = 0x78;  const VK_F10: u32 = 0x79;
+    const VK_F11: u32 = 0x7A; const VK_F12: u32 = 0x7B;
 
-    const VK_F1: i32 = 0x70;  const VK_F2: i32 = 0x71;
-    const VK_F3: i32 = 0x72;  const VK_F4: i32 = 0x73;
-    const VK_F5: i32 = 0x74;  const VK_F6: i32 = 0x75;
-    const VK_F7: i32 = 0x76;  const VK_F8: i32 = 0x77;
-    const VK_F9: i32 = 0x78;  const VK_F10: i32 = 0x79;
-    const VK_F11: i32 = 0x7A; const VK_F12: i32 = 0x7B;
-
-    fn vk_from_string(s: &str) -> i32 {
+    fn vk_from_string(s: &str) -> u32 {
         match s.to_uppercase().as_str() {
             "F1"=>VK_F1,"F2"=>VK_F2,"F3"=>VK_F3,"F4"=>VK_F4,
             "F5"=>VK_F5,"F6"=>VK_F6,"F7"=>VK_F7,"F8"=>VK_F8,
@@ -47,7 +63,7 @@ mod win32 {
         }
     }
 
-    fn trigger_vk(button: TriggerButton) -> i32 {
+    fn trigger_vk(button: TriggerButton) -> u32 {
         match button {
             TriggerButton::Left => VK_LBUTTON,
             TriggerButton::Forward => VK_XBUTTON2,
@@ -55,85 +71,197 @@ mod win32 {
         }
     }
 
-    // ── FFI ──
-    #[link(name = "user32")]
-    extern "system" {
-        fn GetAsyncKeyState(vKey: i32) -> i16;
+    // ── FFI types ──
+    type HOOKPROC = unsafe extern "system" fn(i32, usize, isize) -> isize;
+    type HHOOK = *mut std::ffi::c_void;
+
+    #[repr(C)]
+    struct MSLLHOOKSTRUCT {
+        pt: [i32; 2],
+        mouse_data: u32,
+        flags: u32,
+        time: u32,
+        dw_extra_info: usize,
     }
 
-    fn is_key_down(vk: i32) -> bool {
-        unsafe { GetAsyncKeyState(vk) < 0 }
+    #[repr(C)]
+    struct KBDLLHOOKSTRUCT {
+        vk_code: u32,
+        scan_code: u32,
+        flags: u32,
+        time: u32,
+        dw_extra_info: usize,
+    }
+
+    #[repr(C)]
+    struct MSG {
+        hwnd: *mut std::ffi::c_void,
+        message: u32,
+        w_param: usize,
+        l_param: isize,
+        time: u32,
+        pt: [i32; 2],
+    }
+
+    #[link(name = "user32")]
+    extern "system" {
+        fn SetWindowsHookExA(
+            id_hook: i32,
+            lpfn: HOOKPROC,
+            hmod: *mut std::ffi::c_void,
+            dw_thread_id: u32,
+        ) -> HHOOK;
+
+        fn CallNextHookEx(
+            hhk: HHOOK,
+            n_code: i32,
+            w_param: usize,
+            l_param: isize,
+        ) -> isize;
+
+        fn GetMessageW(
+            lp_msg: *mut MSG,
+            h_wnd: *mut std::ffi::c_void,
+            w_msg_filter_min: u32,
+            w_msg_filter_max: u32,
+        ) -> i32;
+
+        fn TranslateMessage(lp_msg: *const MSG) -> i32;
+        fn DispatchMessageW(lp_msg: *const MSG) -> isize;
     }
 
     // ── Channel ──
-    #[derive(Clone, Copy)]
-    enum HookMsg { Press, Release, Toggle }
+    #[derive(Clone, Copy, Debug)]
+    enum HookMsg { ButtonDown(u32), ButtonUp(u32), KeyDown(u32) }
     static HOOK_TX: OnceLock<Sender<HookMsg>> = OnceLock::new();
+
+    // ── Hook callbacks (static, access channel via HOOK_TX) ──
+    unsafe extern "system" fn mouse_proc(code: i32, wparam: usize, lparam: isize) -> isize {
+        if code >= 0 {
+            match wparam as u32 {
+                WM_LBUTTONDOWN => { send_mouse(VK_LBUTTON, true); }
+                WM_LBUTTONUP   => { send_mouse(VK_LBUTTON, false); }
+                WM_XBUTTONDOWN => {
+                    let p = lparam as *const MSLLHOOKSTRUCT;
+                    if !p.is_null() {
+                        let vk = match (*p).mouse_data & 0xFFFF {
+                            XBUTTON1 => VK_XBUTTON1,
+                            XBUTTON2 => VK_XBUTTON2,
+                            _ => 0,
+                        };
+                        if vk != 0 { send_mouse(vk, true); }
+                    }
+                }
+                WM_XBUTTONUP => {
+                    let p = lparam as *const MSLLHOOKSTRUCT;
+                    if !p.is_null() {
+                        let vk = match (*p).mouse_data & 0xFFFF {
+                            XBUTTON1 => VK_XBUTTON1,
+                            XBUTTON2 => VK_XBUTTON2,
+                            _ => 0,
+                        };
+                        if vk != 0 { send_mouse(vk, false); }
+                    }
+                }
+                _ => {}
+            }
+        }
+        CallNextHookEx(ptr::null_mut(), code, wparam, lparam)
+    }
+
+    unsafe extern "system" fn keyboard_proc(code: i32, wparam: usize, lparam: isize) -> isize {
+        if code >= 0 && wparam as u32 == WM_KEYDOWN {
+            let p = lparam as *const KBDLLHOOKSTRUCT;
+            if !p.is_null() {
+                let _ = HOOK_TX.get().map(|tx| tx.send(HookMsg::KeyDown((*p).vk_code)));
+            }
+        }
+        CallNextHookEx(ptr::null_mut(), code, wparam, lparam)
+    }
+
+    fn send_mouse(vk: u32, down: bool) {
+        let _ = HOOK_TX.get().map(|tx| {
+            if down {
+                tx.send(HookMsg::ButtonDown(vk))
+            } else {
+                tx.send(HookMsg::ButtonUp(vk))
+            }
+        });
+    }
 
     pub fn spawn(state: Arc<AppState>, engine: Arc<dyn InputEnginePort>) {
         let (tx, rx) = mpsc::channel::<HookMsg>();
         let _ = HOOK_TX.set(tx);
 
-        let state_poll = state.clone();
+        let state_hook = state.clone();
         let state_proc = state.clone();
         let engine_proc = engine.clone();
 
-        // Thread 1: polling loop (2ms ≈ 500 Hz, responsive without crushing CPU)
+        // Thread 1: install hooks + message pump
         thread::spawn(move || {
-            info!("GetAsyncKeyState: polling started");
-            let mut prev_trigger = false;
-            let mut prev_toggle = false;
+            let mouse_hook = unsafe {
+                SetWindowsHookExA(WH_MOUSE_LL, mouse_proc, ptr::null_mut(), 0)
+            };
+            let kbd_hook = unsafe {
+                SetWindowsHookExA(WH_KEYBOARD_LL, keyboard_proc, ptr::null_mut(), 0)
+            };
+            info!("Hooks installed: mouse={:?} kbd={:?}", mouse_hook, kbd_hook);
 
-            loop {
-                let (cur_trigger, cur_toggle) = {
-                    let config = state_poll.config.lock().unwrap();
-                    (is_key_down(trigger_vk(config.trigger_button)),
-                     is_key_down(vk_from_string(&config.toggle_key)))
-                };
-
-                if cur_trigger && !prev_trigger {
-                    let _ = HOOK_TX.get().map(|tx| tx.send(HookMsg::Press));
-                } else if !cur_trigger && prev_trigger {
-                    let _ = HOOK_TX.get().map(|tx| tx.send(HookMsg::Release));
+            // Message pump — hooks fire only while this loop runs
+            let mut msg: MSG = unsafe { mem::zeroed() };
+            while unsafe { GetMessageW(&mut msg, ptr::null_mut(), 0, 0) } > 0 {
+                unsafe {
+                    TranslateMessage(&msg);
+                    DispatchMessageW(&msg);
                 }
-
-                if cur_toggle && !prev_toggle {
-                    let _ = HOOK_TX.get().map(|tx| tx.send(HookMsg::Toggle));
-                }
-
-                prev_trigger = cur_trigger;
-                prev_toggle = cur_toggle;
-
-                thread::sleep(Duration::from_millis(2));
             }
         });
 
         // Thread 2: event processor (same pattern as before)
-        info!("GetAsyncKeyState: event processor started");
+        info!("Hook event processor started");
         thread::spawn(move || {
             for msg in rx {
                 match msg {
-                    HookMsg::Press => {
+                    HookMsg::ButtonDown(vk) => {
+                        // Filter by configured trigger button
+                        let trigger = {
+                            let config = state_proc.config.lock().unwrap();
+                            trigger_vk(config.trigger_button)
+                        };
+                        if vk != trigger { continue; }
+
                         if super::SIMULATING_CLICK.load(Ordering::Relaxed) {
                             super::SIMULATING_CLICK.store(false, Ordering::Relaxed);
                             super::RUNNING.store(false, Ordering::Release);
                             continue;
                         }
                         if state_proc.active.load(Ordering::Relaxed) {
-                            debug!("Left click press (poll), dispatching");
+                            debug!("Left click press (hook), dispatching");
                             Listener::handle_lclick_press(&state_proc, &engine_proc);
                         }
                     }
-                    HookMsg::Release => {
+                    HookMsg::ButtonUp(vk) => {
+                        let trigger = {
+                            let config = state_proc.config.lock().unwrap();
+                            trigger_vk(config.trigger_button)
+                        };
+                        if vk != trigger { continue; }
                         if super::SIMULATING_CLICK.load(Ordering::Relaxed) {
                             continue;
                         }
                         Listener::handle_lclick_release(&state_proc);
                     }
-                    HookMsg::Toggle => {
-                        Listener::stop_spray();
-                        let old = state_proc.active.fetch_xor(true, Ordering::Relaxed);
-                        info!("[Poll] Toggle, active: {} -> {}", old, !old);
+                    HookMsg::KeyDown(vk) => {
+                        // Check if this is the configured toggle key
+                        let toggle_vk = {
+                            let config = state_proc.config.lock().unwrap();
+                            vk_from_string(&config.toggle_key)
+                        };
+                        if vk == toggle_vk {
+                            Listener::stop_spray();
+                            let old = state_proc.active.fetch_xor(true, Ordering::Relaxed);
+                            info!("[Hook] Toggle, active: {} -> {}", old, !old);
+                        }
                     }
                 }
             }

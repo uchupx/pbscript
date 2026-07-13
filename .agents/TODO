@@ -4,6 +4,7 @@
 - [ ] Add tray icon atau minimize-to-tray
 
 ## Done
+- [x] Replace enigo click simulation with raw Windows SendInput FFI
 - [x] Replace `GetAsyncKeyState` polling with Raw Input API
 - [x] Add Forward/Backward (XBUTTON1/2) trigger option
   - [x] `TriggerButton` enum in domain
