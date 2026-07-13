@@ -21,6 +21,7 @@ mod win32 {
     use std::thread;
     use log::{debug, info};
     use crate::app::state::AppState;
+    use crate::domain::entities::TriggerButton;
     use crate::domain::ports::InputEnginePort;
     use crate::infra::listener::Listener;
 
@@ -52,6 +53,10 @@ mod win32 {
     const RIM_TYPEKEYBOARD: DWORD = 1;
     const RI_MOUSE_LEFT_BUTTON_DOWN: WORD = 0x0001;
     const RI_MOUSE_LEFT_BUTTON_UP: WORD = 0x0002;
+    const RI_MOUSE_BUTTON_4_DOWN: WORD = 0x0040;  // Forward (XBUTTON2)
+    const RI_MOUSE_BUTTON_4_UP: WORD = 0x0080;
+    const RI_MOUSE_BUTTON_5_DOWN: WORD = 0x0100;  // Backward (XBUTTON1)
+    const RI_MOUSE_BUTTON_5_UP: WORD = 0x0200;
     const HID_USAGE_PAGE_GENERIC: WORD = 0x01;
     const HID_USAGE_MOUSE: WORD = 0x02;
     const HID_USAGE_KEYBOARD: WORD = 0x06;
@@ -234,12 +239,23 @@ mod win32 {
             && size >= std::mem::size_of::<RAWINPUTHEADER>() as UINT + std::mem::size_of::<RAWMOUSE>() as UINT
         {
             let mouse = &*(buf.as_ptr().add(std::mem::size_of::<RAWINPUTHEADER>()) as *const RAWMOUSE);
-            if mouse.usButtonFlags & RI_MOUSE_LEFT_BUTTON_DOWN != 0 {
+
+            // Check which button flags to detect based on config (user may change mid-game)
+            let (expect_down, expect_up) = RAW_STATE
+                .get()
+                .and_then(|s| s.config.lock().ok().map(|c| match c.trigger_button {
+                    TriggerButton::Left => (RI_MOUSE_LEFT_BUTTON_DOWN, RI_MOUSE_LEFT_BUTTON_UP),
+                    TriggerButton::Forward => (RI_MOUSE_BUTTON_4_DOWN, RI_MOUSE_BUTTON_4_UP),
+                    TriggerButton::Backward => (RI_MOUSE_BUTTON_5_DOWN, RI_MOUSE_BUTTON_5_UP),
+                }))
+                .unwrap_or((RI_MOUSE_LEFT_BUTTON_DOWN, RI_MOUSE_LEFT_BUTTON_UP));
+
+            if mouse.usButtonFlags & expect_down != 0 {
                 if let Some(tx) = HOOK_TX.get() {
                     let _ = tx.send(HookMsg::Press);
                 }
             }
-            if mouse.usButtonFlags & RI_MOUSE_LEFT_BUTTON_UP != 0 {
+            if mouse.usButtonFlags & expect_up != 0 {
                 if let Some(tx) = HOOK_TX.get() {
                     let _ = tx.send(HookMsg::Release);
                 }

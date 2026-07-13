@@ -6,6 +6,12 @@ enum ModeType {           // serde Serialize + Deserialize
     Shotgun,
 }
 
+enum TriggerButton {      // serde Serialize + Deserialize
+    Left,                   // default
+    Forward,                // XBUTTON2 (browser forward)
+    Backward,               // XBUTTON1 (browser back)
+}
+
 enum StepAction {
     RightClick,
     LeftClick,
@@ -64,6 +70,7 @@ struct AppConfig {          // serde Serialize + Deserialize
     ar_recoil_pixels: i32,      // default: 10
     shotgun_tembak_delay_ms: u32, // default: 30
     shotgun_ganti_delay_ms: u32,  // default: 50
+    trigger_button: TriggerButton, // default: Left
 }
 
 struct AppState {
@@ -87,15 +94,14 @@ static RUNNING: AtomicBool;          // Guards sequence re-entry
 static SIMULATING_CLICK: AtomicBool; // Guards feedback loop (sim events ignored)
 
 // Threads (Windows):
-//   Thread 1 (polling): loop 1ms sleep — GetAsyncKeyState() left button + toggle key edge detect
-//     - VK_LBUTTON press → HookMsg::Press, VK_LBUTTON release → HookMsg::Release
-//     - toggle key press → HookMsg::Toggle
-//     - Reads toggle_key from config each iteration (user may change in UI)
+//   Thread 1 (pump): hidden HWND_MESSAGE → RegisterRawInputDevices → GetMessageW loop
+//     - WM_INPUT → RAWMOUSE.usButtonFlags (checks trigger_button config for left/forward/back)
+//     - WM_INPUT → RAWKEYBOARD.VKey == toggle → HookMsg::Toggle
 //   Thread 2 (processor): reads HookMsg channel → Press/Release/Toggle
 //     (same as before, unchanged)
 
 // Methods: handle_lclick_press, handle_lclick_release,
 //          execute_sequence_sniper, execute_sequence_shotgun,
 //          start_spray, stop_spray, do_switch
-// Event flow: sim click → SIMULATING_CLICK on → polling detects physical click but
+// Event flow: sim click → SIMULATING_CLICK on → pump sends event but
 //             processor loop skips it → clears SIMULATING_CLICK + RUNNING

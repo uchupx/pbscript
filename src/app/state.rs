@@ -1,4 +1,4 @@
-use crate::domain::entities::{ModeType, SwitchMode};
+use crate::domain::entities::{ModeType, SwitchMode, TriggerButton};
 
 /// Persistent app configuration (serde-serialized to TOML).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -15,6 +15,7 @@ pub struct AppConfig {
     pub ar_recoil_pixels: i32,
     pub shotgun_tembak_delay_ms: u32,
     pub shotgun_ganti_delay_ms: u32,
+    pub trigger_button: TriggerButton,
 }
 
 impl Default for AppConfig {
@@ -32,6 +33,7 @@ impl Default for AppConfig {
             ar_recoil_pixels: 10,
             shotgun_tembak_delay_ms: 30,
             shotgun_ganti_delay_ms: 50,
+            trigger_button: TriggerButton::Left,
         }
     }
 }

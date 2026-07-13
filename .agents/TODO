@@ -1,10 +1,12 @@
 ## Pending
-- [ ] Test Raw Input API di Windows — build, push, run `debug.bat`
+- [ ] Test Forward/Backward trigger mode in-game
+- [ ] Test Raw Input API detection + simulation di Windows
 - [ ] Add tray icon atau minimize-to-tray
 
 ## Done
-- [x] Replace `GetAsyncKeyState` polling with Raw Input API (`RegisterRawInputDevices` + `WM_INPUT`)
-  - [x] Mouse click detection via `RAWMOUSE.usButtonFlags`
-  - [x] Keyboard toggle key detection via `RAWKEYBOARD.VKey`
-  - [x] Hidden `HWND_MESSAGE` window + message pump
-  - [x] No new dependencies — manual FFI to user32.dll
+- [x] Replace `GetAsyncKeyState` polling with Raw Input API
+- [x] Add Forward/Backward (XBUTTON1/2) trigger option
+  - [x] `TriggerButton` enum in domain
+  - [x] `trigger_button` field in AppConfig
+  - [x] Conditional detection in `handle_raw_input`
+  - [x] UI radio selector (Kiri/Maju/Mundur)

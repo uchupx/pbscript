@@ -13,6 +13,14 @@ pub enum SwitchMode {
     Num31,
 }
 
+/// Which mouse button triggers the macro.
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+pub enum TriggerButton {
+    Left,
+    Forward,
+    Backward,
+}
+
 /// One step in the sequence with delay after execution.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SequenceStep {

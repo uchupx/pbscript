@@ -10,11 +10,13 @@ pbscript/
 │   │   ├── 2026-07-10-pbscript-wayland-fix-plan.md
 │   │   ├── 2026-07-10-pbscript-sniper-quick-switch-plan.md
 │   │   ├── 2026-07-12-pbscript-ar-smg-shotgun-modes-plan.md
-│   │   └── 2026-07-13-pbscript-raw-input-windows-listener-plan.md
+│   │   ├── 2026-07-13-pbscript-raw-input-windows-listener-plan.md
+│   │   └── 2026-07-13-pbscript-forward-back-trigger-plan.md
 │       └── specs/
 │           ├── 2026-07-10-pbscript-sniper-quick-switch-design.md
 │           ├── 2026-07-12-pbscript-ar-smg-shotgun-modes-design.md
-│           └── 2026-07-13-pbscript-raw-input-windows-listener-design.md
+│           ├── 2026-07-13-pbscript-raw-input-windows-listener-design.md
+│           └── 2026-07-13-pbscript-forward-back-trigger-design.md
 ├── src/
 │   ├── main.rs                    # Entry point, wires everything together
 │   ├── domain/

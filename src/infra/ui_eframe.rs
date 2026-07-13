@@ -5,7 +5,7 @@ use eframe::egui::{self, Slider};
 
 use crate::app::state::AppConfig;
 use crate::app::state::AppState;
-use crate::domain::entities::{ModeType, SwitchMode};
+use crate::domain::entities::{ModeType, SwitchMode, TriggerButton};
 
 pub struct PbscriptApp {
     state: Arc<AppState>,
@@ -121,6 +121,14 @@ impl eframe::App for PbscriptApp {
             }
 
             ui.separator();
+
+            // --- Trigger button selector ---
+            ui.horizontal(|ui| {
+                ui.label("Tombol Trigger:");
+                ui.radio_value(&mut self.config_cache.trigger_button, TriggerButton::Left, "Kiri");
+                ui.radio_value(&mut self.config_cache.trigger_button, TriggerButton::Forward, "Maju");
+                ui.radio_value(&mut self.config_cache.trigger_button, TriggerButton::Backward, "Mundur");
+            });
 
             // --- Status ---
             let active = self.state.active.load(Ordering::Relaxed);
