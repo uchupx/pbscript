@@ -53,10 +53,10 @@ mod win32 {
     const RIM_TYPEKEYBOARD: DWORD = 1;
     const RI_MOUSE_LEFT_BUTTON_DOWN: WORD = 0x0001;
     const RI_MOUSE_LEFT_BUTTON_UP: WORD = 0x0002;
-    const RI_MOUSE_BUTTON_4_DOWN: WORD = 0x0040;  // Forward (XBUTTON2)
-    const RI_MOUSE_BUTTON_4_UP: WORD = 0x0080;
-    const RI_MOUSE_BUTTON_5_DOWN: WORD = 0x0100;  // Backward (XBUTTON1)
-    const RI_MOUSE_BUTTON_5_UP: WORD = 0x0200;
+const RI_MOUSE_BUTTON_4_DOWN: WORD = 0x0040;  // XBUTTON1 (Back)
+const RI_MOUSE_BUTTON_4_UP: WORD = 0x0080;
+const RI_MOUSE_BUTTON_5_DOWN: WORD = 0x0100;  // XBUTTON2 (Forward)
+const RI_MOUSE_BUTTON_5_UP: WORD = 0x0200;
     const HID_USAGE_PAGE_GENERIC: WORD = 0x01;
     const HID_USAGE_MOUSE: WORD = 0x02;
     const HID_USAGE_KEYBOARD: WORD = 0x06;
@@ -245,8 +245,8 @@ mod win32 {
                 .get()
                 .and_then(|s| s.config.lock().ok().map(|c| match c.trigger_button {
                     TriggerButton::Left => (RI_MOUSE_LEFT_BUTTON_DOWN, RI_MOUSE_LEFT_BUTTON_UP),
-                    TriggerButton::Forward => (RI_MOUSE_BUTTON_4_DOWN, RI_MOUSE_BUTTON_4_UP),
-                    TriggerButton::Backward => (RI_MOUSE_BUTTON_5_DOWN, RI_MOUSE_BUTTON_5_UP),
+                    TriggerButton::Forward => (RI_MOUSE_BUTTON_5_DOWN, RI_MOUSE_BUTTON_5_UP),  // XBUTTON2
+                    TriggerButton::Backward => (RI_MOUSE_BUTTON_4_DOWN, RI_MOUSE_BUTTON_4_UP), // XBUTTON1
                 }))
                 .unwrap_or((RI_MOUSE_LEFT_BUTTON_DOWN, RI_MOUSE_LEFT_BUTTON_UP));
 
