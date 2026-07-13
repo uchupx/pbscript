@@ -1,17 +1,20 @@
 pbscript/
 ├── Cargo.toml
 ├── Cargo.lock
-├── debug.bat
+├── build.sh
+├── debug.sh
 ├── .github/
 ├── docs/
 │   └── superpowers/
 │       ├── plans/
-│       │   ├── 2026-07-10-pbscript-wayland-fix-plan.md
-│       │   ├── 2026-07-10-pbscript-sniper-quick-switch-plan.md
-│       │   └── 2026-07-12-pbscript-ar-smg-shotgun-modes-plan.md
+│   │   ├── 2026-07-10-pbscript-wayland-fix-plan.md
+│   │   ├── 2026-07-10-pbscript-sniper-quick-switch-plan.md
+│   │   ├── 2026-07-12-pbscript-ar-smg-shotgun-modes-plan.md
+│   │   └── 2026-07-13-pbscript-raw-input-windows-listener-plan.md
 │       └── specs/
 │           ├── 2026-07-10-pbscript-sniper-quick-switch-design.md
-│           └── 2026-07-12-pbscript-ar-smg-shotgun-modes-design.md
+│           ├── 2026-07-12-pbscript-ar-smg-shotgun-modes-design.md
+│           └── 2026-07-13-pbscript-raw-input-windows-listener-design.md
 ├── src/
 │   ├── main.rs                    # Entry point, wires everything together
 │   ├── domain/
@@ -25,8 +28,8 @@ pbscript/
 │       ├── mod.rs
 │       ├── ui_eframe.rs           # egui UI: PbscriptApp, 3 mode tabs with sliders
 │       ├── config_toml.rs         # ConfigToml: TOML file persistence
-│   ├── listener.rs            # Global listener: evdev (Linux) / Win32 GetAsyncKeyState poll (Windows) / rdev (macOS)
-│   │   └── win32 module       # GetAsyncKeyState polling loop (1ms), no hooks
+│   ├── listener.rs            # Global listener: evdev (Linux) / Win32 Raw Input API (Windows) / rdev (macOS)
+│   │   └── win32 module       # Raw Input API: RegisterRawInputDevices + WM_INPUT, msg-only window
 │       └── input_enigo.rs         # InputEngineEnigo: enigo-based input simulation + move_mouse
 └── .agents/
     ├── Structure

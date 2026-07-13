@@ -12,30 +12,60 @@ use crate::app::state::AppState;
 use crate::domain::entities::{Key, ModeType, SequenceStep, StepAction, SwitchMode};
 use crate::domain::ports::InputEnginePort;
 
-// ── Windows: GetAsyncKeyState polling (bypasses anti-cheat hook blocking) ──
+// ── Windows: Raw Input API (reads from HID, bypasses GetAsyncKeyState hooks) ──
 #[cfg(windows)]
 mod win32 {
     use std::sync::atomic::Ordering;
     use std::sync::mpsc::{self, Sender};
     use std::sync::{Arc, OnceLock};
     use std::thread;
-    use std::time::Duration;
     use log::{debug, info};
     use crate::app::state::AppState;
     use crate::domain::ports::InputEnginePort;
     use crate::infra::listener::Listener;
 
-    // ── Constants ──
+    // ── Win32 type aliases ──
 
-    const VK_LBUTTON: i32 = 0x01;
-    const VK_F1: i32 = 0x70;  const VK_F2: i32 = 0x71;
-    const VK_F3: i32 = 0x72;  const VK_F4: i32 = 0x73;
-    const VK_F5: i32 = 0x74;  const VK_F6: i32 = 0x75;
-    const VK_F7: i32 = 0x76;  const VK_F8: i32 = 0x77;
-    const VK_F9: i32 = 0x78;  const VK_F10: i32 = 0x79;
-    const VK_F11: i32 = 0x7A; const VK_F12: i32 = 0x7B;
+    type HWND = *mut std::ffi::c_void;
+    type HRAWINPUT = *mut std::ffi::c_void;
+    type HINSTANCE = *mut std::ffi::c_void;
+    type WPARAM = usize;
+    type LPARAM = isize;
+    type LRESULT = isize;
+    type BOOL = i32;
+    type UINT = u32;
+    type WORD = u16;
+    type DWORD = u32;
+    type ATOM = u16;
 
-    fn vk_from_string(s: &str) -> i32 {
+    const TRUE: BOOL = 1;
+    const FALSE: BOOL = 0;
+
+    // ── Raw Input constants ──
+
+    const RIDEV_INPUTSINK: DWORD = 0x00000100;
+    const WM_INPUT: UINT = 0x00FF;
+    const WM_DESTROY: UINT = 0x0002;
+    const RID_INPUT: UINT = 0x10000003;
+    const RIM_TYPEMOUSE: DWORD = 0;
+    const RIM_TYPEKEYBOARD: DWORD = 1;
+    const RI_MOUSE_LEFT_BUTTON_DOWN: WORD = 0x0001;
+    const RI_MOUSE_LEFT_BUTTON_UP: WORD = 0x0002;
+    const HID_USAGE_PAGE_GENERIC: WORD = 0x01;
+    const HID_USAGE_MOUSE: WORD = 0x02;
+    const HID_USAGE_KEYBOARD: WORD = 0x06;
+    const RI_KEY_MAKE: WORD = 0;
+
+    // ── Virtual key codes for toggle key ──
+
+    const VK_F1: WORD = 0x70;  const VK_F2: WORD = 0x71;
+    const VK_F3: WORD = 0x72;  const VK_F4: WORD = 0x73;
+    const VK_F5: WORD = 0x74;  const VK_F6: WORD = 0x75;
+    const VK_F7: WORD = 0x76;  const VK_F8: WORD = 0x77;
+    const VK_F9: WORD = 0x78;  const VK_F10: WORD = 0x79;
+    const VK_F11: WORD = 0x7A; const VK_F12: WORD = 0x7B;
+
+    fn vk_from_string(s: &str) -> WORD {
         match s.to_uppercase().as_str() {
             "F1"=>VK_F1,"F2"=>VK_F2,"F3"=>VK_F3,"F4"=>VK_F4,
             "F5"=>VK_F5,"F6"=>VK_F6,"F7"=>VK_F7,"F8"=>VK_F8,
@@ -44,71 +74,288 @@ mod win32 {
         }
     }
 
-    // ── FFI (only 1 function needed) ──
+    // ── Win32 structs ──
+
+    #[repr(C)]
+    struct RAWINPUTDEVICE {
+        usUsagePage: WORD,
+        usUsage: WORD,
+        dwFlags: DWORD,
+        hwndTarget: HWND,
+    }
+
+    #[repr(C)]
+    struct RAWINPUTHEADER {
+        dwType: DWORD,
+        dwSize: DWORD,
+        hDevice: HRAWINPUT,
+        wParam: WPARAM,
+    }
+
+    #[repr(C)]
+    struct RAWMOUSE {
+        usFlags: WORD,
+        usButtonFlags: WORD,
+        usButtonData: WORD,
+        ulRawButtons: DWORD,
+        lLastX: LONG,
+        lLastY: LONG,
+        ulExtraInformation: DWORD,
+    }
+
+    #[repr(C)]
+    struct RAWKEYBOARD {
+        MakeCode: WORD,
+        Flags: WORD,
+        Reserved: WORD,
+        VKey: WORD,
+        Message: UINT,
+        ExtraInformation: DWORD,
+    }
+
+    #[repr(C)]
+    struct MSG {
+        hwnd: HWND,
+        message: UINT,
+        wParam: WPARAM,
+        lParam: LPARAM,
+        time: DWORD,
+        pt: i64,
+    }
+
+    #[repr(C)]
+    struct WNDCLASSW {
+        style: UINT,
+        lpfnWndProc: Option<unsafe extern "system" fn(HWND, UINT, WPARAM, LPARAM) -> LRESULT>,
+        cbClsExtra: i32,
+        cbWndExtra: i32,
+        hInstance: HINSTANCE,
+        hIcon: *mut std::ffi::c_void,
+        hCursor: *mut std::ffi::c_void,
+        hbrBackground: *mut std::ffi::c_void,
+        lpszMenuName: *const u16,
+        lpszClassName: *const u16,
+    }
+
+    // ── FFI functions ──
 
     #[link(name = "user32")]
     extern "system" {
-        fn GetAsyncKeyState(vKey: i32) -> i16;
+        fn RegisterRawInputDevices(
+            pRawInputDevices: *const RAWINPUTDEVICE,
+            uiNumDevices: UINT,
+            cbSize: DWORD,
+        ) -> BOOL;
+        fn GetRawInputData(
+            hRawInput: HRAWINPUT,
+            uiCommand: UINT,
+            pData: *mut std::ffi::c_void,
+            pcbSize: *mut UINT,
+            cbSizeHeader: UINT,
+        ) -> UINT;
+        fn CreateWindowExW(
+            dwExStyle: DWORD,
+            lpClassName: *const u16,
+            lpWindowName: *const u16,
+            dwStyle: DWORD,
+            x: i32, y: i32, nWidth: i32, nHeight: i32,
+            hWndParent: HWND,
+            hMenu: *mut std::ffi::c_void,
+            hInstance: HINSTANCE,
+            lpParam: *mut std::ffi::c_void,
+        ) -> HWND;
+        fn DefWindowProcW(
+            hWnd: HWND, Msg: UINT, wParam: WPARAM, lParam: LPARAM,
+        ) -> LRESULT;
+        fn GetMessageW(
+            lpMsg: *mut MSG, hWnd: HWND,
+            wMsgFilterMin: UINT, wMsgFilterMax: UINT,
+        ) -> BOOL;
+        fn DispatchMessageW(lpMsg: *const MSG) -> LRESULT;
+        fn RegisterClassW(lpWndClass: *const WNDCLASSW) -> ATOM;
     }
 
-    // ── Polling communication ──
+    // ── Channel (same as before) ──
 
     #[derive(Clone, Copy)]
     enum HookMsg { Press, Release, Toggle }
     static HOOK_TX: OnceLock<Sender<HookMsg>> = OnceLock::new();
+
+    // ── State for window proc ──
+
+    static RAW_STATE: OnceLock<Arc<AppState>> = OnceLock::new();
+
+    // ── Window procedure ──
+
+    unsafe extern "system" fn wnd_proc(
+        hwnd: HWND, msg: UINT, wparam: WPARAM, lparam: LPARAM,
+    ) -> LRESULT {
+        if msg == WM_INPUT {
+            handle_raw_input(lparam);
+            return 0;
+        }
+        if msg == WM_DESTROY {
+            // ponytail: no PostQuitMessage needed — GetMessageW returns 0
+        }
+        DefWindowProcW(hwnd, msg, wparam, lparam)
+    }
+
+    unsafe fn handle_raw_input(lparam: LPARAM) {
+        // Get required buffer size
+        let mut size: UINT = 0;
+        GetRawInputData(
+            lparam as HRAWINPUT,
+            RID_INPUT,
+            std::ptr::null_mut(),
+            &mut size,
+            std::mem::size_of::<RAWINPUTHEADER>() as UINT,
+        );
+        if size == 0 {
+            return;
+        }
+
+        // Allocate and get actual data
+        let mut buf = vec![0u8; size as usize];
+        let written = GetRawInputData(
+            lparam as HRAWINPUT,
+            RID_INPUT,
+            buf.as_mut_ptr() as *mut std::ffi::c_void,
+            &mut size,
+            std::mem::size_of::<RAWINPUTHEADER>() as UINT,
+        );
+        if written == 0 || written == u32::MAX {
+            return;
+        }
+
+        let header = &*(buf.as_ptr() as *const RAWINPUTHEADER);
+
+        if header.dwType == RIM_TYPEMOUSE
+            && size >= std::mem::size_of::<RAWINPUTHEADER>() as UINT + std::mem::size_of::<RAWMOUSE>() as UINT
+        {
+            let mouse = &*(buf.as_ptr().add(std::mem::size_of::<RAWINPUTHEADER>()) as *const RAWMOUSE);
+            if mouse.usButtonFlags & RI_MOUSE_LEFT_BUTTON_DOWN != 0 {
+                if let Some(tx) = HOOK_TX.get() {
+                    let _ = tx.send(HookMsg::Press);
+                }
+            }
+            if mouse.usButtonFlags & RI_MOUSE_LEFT_BUTTON_UP != 0 {
+                if let Some(tx) = HOOK_TX.get() {
+                    let _ = tx.send(HookMsg::Release);
+                }
+            }
+        } else if header.dwType == RIM_TYPEKEYBOARD
+            && size >= std::mem::size_of::<RAWINPUTHEADER>() as UINT + std::mem::size_of::<RAWKEYBOARD>() as UINT
+        {
+            let kbd = &*(buf.as_ptr().add(std::mem::size_of::<RAWINPUTHEADER>()) as *const RAWKEYBOARD);
+            // Only key down events for toggle
+            if kbd.Flags == RI_KEY_MAKE {
+                if let Some(state) = RAW_STATE.get() {
+                    let toggle_vk = {
+                        let config = state.config.lock().unwrap();
+                        vk_from_string(&config.toggle_key)
+                    };
+                    if kbd.VKey == toggle_vk as WORD {
+                        if let Some(tx) = HOOK_TX.get() {
+                            let _ = tx.send(HookMsg::Toggle);
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     // ── Entry point ──
 
     pub fn spawn(state: Arc<AppState>, engine: Arc<dyn InputEnginePort>) {
         let (tx, rx) = mpsc::channel::<HookMsg>();
         let _ = HOOK_TX.set(tx);
+        let _ = RAW_STATE.set(state.clone());
 
-        // Polling thread only needs state; processor thread gets its own clone + engine
         let state_proc = state.clone();
+        let engine_proc = engine.clone();
 
-        // Thread 1: polling loop — reads physical key state 1000x/sec
-        // ponytail: 1ms polling is fine for 60fps game input
-        thread::spawn(move || {
-            info!("Win32: polling started (1ms interval)");
+        // Thread 1: Raw Input message pump (no capture needed — uses static RAW_STATE)
+        thread::spawn(|| {
+            info!("RawInput: starting message pump");
 
-            let mut prev_lbutton = false;
-            let mut prev_toggle = false;
-
-            loop {
-                // Read toggle key from config (user may change it in UI)
-                let toggle_vk = {
-                    let config = state.config.lock().unwrap();
-                    vk_from_string(&config.toggle_key)
+            unsafe {
+                // Register window class
+                let class_name = "RawInputWndClass\0".encode_utf16().collect::<Vec<_>>();
+                let wc = WNDCLASSW {
+                    style: 0,
+                    lpfnWndProc: Some(wnd_proc),
+                    cbClsExtra: 0,
+                    cbWndExtra: 0,
+                    hInstance: std::ptr::null_mut(),
+                    hIcon: std::ptr::null_mut(),
+                    hCursor: std::ptr::null_mut(),
+                    hbrBackground: std::ptr::null_mut(),
+                    lpszMenuName: std::ptr::null(),
+                    lpszClassName: class_name.as_ptr(),
                 };
+                RegisterClassW(&wc);
 
-                // Left mouse button edge detection
-                let lbutton_down = unsafe { (GetAsyncKeyState(VK_LBUTTON) as u16) & 0x8000 != 0 };
-                if lbutton_down && !prev_lbutton {
-                    if let Some(tx) = HOOK_TX.get() {
-                        let _ = tx.send(HookMsg::Press);
-                    }
-                } else if !lbutton_down && prev_lbutton {
-                    if let Some(tx) = HOOK_TX.get() {
-                        let _ = tx.send(HookMsg::Release);
-                    }
+                // Create hidden message-only window
+                let hwnd = CreateWindowExW(
+                    0,
+                    class_name.as_ptr(),
+                    std::ptr::null(),
+                    0,
+                    0, 0, 0, 0,
+                    -3isize as HWND, // HWND_MESSAGE
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                );
+                if hwnd.is_null() {
+                    info!("RawInput: CreateWindowExW failed");
+                    return;
                 }
-                prev_lbutton = lbutton_down;
 
-                // Toggle key edge detection
-                let toggle_down = unsafe { (GetAsyncKeyState(toggle_vk) as u16) & 0x8000 != 0 };
-                if toggle_down && !prev_toggle {
-                    if let Some(tx) = HOOK_TX.get() {
-                        let _ = tx.send(HookMsg::Toggle);
-                    }
+                // Register raw input devices (mouse + keyboard)
+                let devices = [
+                    RAWINPUTDEVICE {
+                        usUsagePage: HID_USAGE_PAGE_GENERIC,
+                        usUsage: HID_USAGE_MOUSE,
+                        dwFlags: RIDEV_INPUTSINK,
+                        hwndTarget: hwnd,
+                    },
+                    RAWINPUTDEVICE {
+                        usUsagePage: HID_USAGE_PAGE_GENERIC,
+                        usUsage: HID_USAGE_KEYBOARD,
+                        dwFlags: RIDEV_INPUTSINK,
+                        hwndTarget: hwnd,
+                    },
+                ];
+                let ok = RegisterRawInputDevices(
+                    devices.as_ptr(),
+                    2,
+                    std::mem::size_of::<RAWINPUTDEVICE>() as DWORD,
+                );
+                if ok == FALSE {
+                    info!("RawInput: RegisterRawInputDevices failed");
+                    return;
                 }
-                prev_toggle = toggle_down;
 
-                thread::sleep(Duration::from_millis(1));
+                info!("RawInput: pump started (msg-only window)");
+
+                // Message pump
+                let mut msg = std::mem::zeroed::<MSG>();
+                loop {
+                    let ret = GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0);
+                    if ret == FALSE || ret == -1 {
+                        // WM_QUIT or error
+                        break;
+                    }
+                    DispatchMessageW(&msg);
+                }
             }
+
+            info!("RawInput: pump exited");
         });
 
-        // Thread 2: event processor (same as before)
-        info!("Win32 event processor started");
+        // Thread 2: event processor (identical to before)
+        info!("RawInput: event processor started");
         thread::spawn(move || {
             for msg in rx {
                 match msg {
@@ -119,8 +366,8 @@ mod win32 {
                             continue;
                         }
                         if state_proc.active.load(Ordering::Relaxed) {
-                            debug!("Left click press (win32), dispatching");
-                            Listener::handle_lclick_press(&state_proc, &engine);
+                            debug!("Left click press (rawinput), dispatching");
+                            Listener::handle_lclick_press(&state_proc, &engine_proc);
                         }
                     }
                     HookMsg::Release => {
@@ -132,7 +379,7 @@ mod win32 {
                     HookMsg::Toggle => {
                         Listener::stop_spray();
                         let old = state_proc.active.fetch_xor(true, Ordering::Relaxed);
-                        info!("[PollWin32] Toggle, active: {} -> {}", old, !old);
+                        info!("[RawInput] Toggle, active: {} -> {}", old, !old);
                     }
                 }
             }

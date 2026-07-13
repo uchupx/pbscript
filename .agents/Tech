@@ -25,7 +25,7 @@ Architecture:
   - AtomicBool (static SPRAYING) for AR/SMG spray loop control
   - Mutex<AppConfig> for shared config access
   - Mode dispatch: handle_lclick_press/release routes to mode-specific logic
-  - Platform-conditional listener: evdev on Linux, Win32 GetAsyncKeyState polling (1ms interval) on Windows, rdev on macOS
+  - Platform-conditional listener: evdev on Linux, Win32 Raw Input API (RegisterRawInputDevices + WM_INPUT, HWND_MESSAGE pump) on Windows, rdev on macOS
 
 Modes:
   - Sniper: 4-step sequence (RClick → LClick → RClick → Switch), trigger on L-Click

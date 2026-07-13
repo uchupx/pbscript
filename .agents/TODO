@@ -1,9 +1,10 @@
 ## Pending
-- [ ] Test `GetAsyncKeyState` polling — build, push, run `debug.bat`
+- [ ] Test Raw Input API di Windows — build, push, run `debug.bat`
 - [ ] Add tray icon atau minimize-to-tray
 
-## Notes
-- **Raw Input API** — fallback if polling bermasalah dengan anti-cheat tertentu.
-  Registrasi: `RegisterRawInputDevices(usUsage=0x01/mouse, RIDEV_INPUTSINK)`.
-  Butuh hidden window (`HWND_MESSAGE`) + message pump + `WM_INPUT` handler.
-  Referensi: https://learn.microsoft.com/en-us/windows/win32/inputdev/using-raw-input
+## Done
+- [x] Replace `GetAsyncKeyState` polling with Raw Input API (`RegisterRawInputDevices` + `WM_INPUT`)
+  - [x] Mouse click detection via `RAWMOUSE.usButtonFlags`
+  - [x] Keyboard toggle key detection via `RAWKEYBOARD.VKey`
+  - [x] Hidden `HWND_MESSAGE` window + message pump
+  - [x] No new dependencies — manual FFI to user32.dll
