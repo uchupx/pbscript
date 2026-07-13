@@ -36,6 +36,7 @@ mod win32 {
     type UINT = u32;
     type WORD = u16;
     type DWORD = u32;
+    type LONG = i32;
     type ATOM = u16;
 
     const TRUE: BOOL = 1;
