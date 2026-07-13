@@ -62,7 +62,7 @@ mod win32 {
     }
 
     fn is_key_down(vk: i32) -> bool {
-        unsafe { GetAsyncKeyState(vk) & 0x8000 != 0 }
+        unsafe { GetAsyncKeyState(vk) < 0 }
     }
 
     // ── Channel ──
